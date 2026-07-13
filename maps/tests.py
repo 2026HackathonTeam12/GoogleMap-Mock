@@ -1,4 +1,4 @@
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 
 class MapPageTests(TestCase):
@@ -9,14 +9,16 @@ class MapPageTests(TestCase):
         self.assertContains(response, 'GoogleMap-Mock')
         self.assertContains(response, 'id="map"')
         self.assertContains(response, 'maps/app.js')
+        self.assertContains(response, 'unpkg.com/leaflet')
 
-    def test_places_api_returns_real_places(self):
-        response = self.client.get('/api/places/')
+    @override_settings(GOOGLE_MAPS_API_KEY='test-key')
+    def test_index_loads_google_maps_with_places_when_key_exists(self):
+        response = self.client.get('/')
 
         self.assertEqual(response.status_code, 200)
-        place_names = {place['name'] for place in response.json()['places']}
-        self.assertIn('경복궁', place_names)
-        self.assertIn('롯데월드타워', place_names)
+        self.assertContains(response, 'maps.googleapis.com/maps/api/js')
+        self.assertContains(response, 'libraries=places')
+        self.assertNotContains(response, 'unpkg.com/leaflet')
 
     def test_health_returns_ok(self):
         response = self.client.get('/health/')

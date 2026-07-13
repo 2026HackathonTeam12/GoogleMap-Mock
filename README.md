@@ -17,18 +17,17 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-Google Maps JavaScript API를 사용하려면 실행 전에 브라우저용 API 키를 환경변수로 지정합니다.
+Google Maps JavaScript API와 Places Library를 사용하려면 실행 전에 브라우저용 API 키를 환경변수로 지정합니다.
 
 ```bash
 export GOOGLE_MAPS_API_KEY="your-google-maps-browser-key"
 python manage.py runserver
 ```
 
-키가 없으면 개발 확인용 OpenStreetMap 지도로 표시됩니다.
+키가 없으면 개발 확인용 OpenStreetMap 지도로 표시됩니다. Google Maps의 실제 장소 클릭과 검색은 API 키가 있을 때만 동작합니다.
 
 ## Endpoints
 
 - `GET /` - service status
-- `GET /api/places/` - place list used by the map
 - `GET /health/` - health check
 - `GET /admin/` - Django admin

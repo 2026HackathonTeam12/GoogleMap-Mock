@@ -1,8 +1,6 @@
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
-from django.conf import settings
-
-from .places import PLACES
 
 
 def index(request):
@@ -17,7 +15,3 @@ def index(request):
 
 def health(request):
     return JsonResponse({'status': 'ok'})
-
-
-def places(request):
-    return JsonResponse({'places': PLACES})

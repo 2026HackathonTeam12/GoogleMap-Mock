@@ -230,6 +230,16 @@ input {
     color: var(--muted);
 }
 
+.place-meta a {
+    color: var(--blue);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.place-meta a:hover {
+    text-decoration: underline;
+}
+
 .results-panel {
     position: absolute;
     top: 84px;
@@ -279,6 +289,13 @@ input {
 
 .result-button:hover {
     background: #f5f7fa;
+}
+
+.result-message {
+    margin: 0;
+    padding: 14px 16px;
+    color: var(--muted);
+    font-size: 14px;
 }
 
 .result-button strong,

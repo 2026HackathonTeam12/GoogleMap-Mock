@@ -26,7 +26,7 @@
             </div>
             <label class="search-box">
                 <span class="visually-hidden">장소 검색</span>
-                <input id="placeSearch" type="search" placeholder="GoogleMap-Mock 검색" autocomplete="off">
+                <input id="placeSearch" type="search" placeholder="장소, 음식점, 카페 검색" autocomplete="off">
             </label>
             <button id="clearSearch" class="icon-button" type="button" aria-label="검색 초기화">
                 <span aria-hidden="true">×</span>
@@ -53,7 +53,7 @@
                         <dd id="placeHours"></dd>
                     </div>
                     <div>
-                        <dt>추천</dt>
+                        <dt>연락</dt>
                         <dd id="placeTip"></dd>
                     </div>
                 </dl>
@@ -71,7 +71,7 @@
     <script src="{% static 'maps/app.js' %}"></script>
     {% if google_maps_api_key %}
     <script
-        src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key|urlencode }}&callback=initGoogleMap&loading=async&language=ko&region=KR"
+        src="https://maps.googleapis.com/maps/api/js?key={{ google_maps_api_key|urlencode }}&callback=initGoogleMap&loading=async&language=ko&region=KR&libraries=places"
         async
         defer
     ></script>
