@@ -175,6 +175,42 @@
       }
     },
     "/api/reviews/{review_id}/reply/{reply_id}/": {
+      "patch": {
+        "summary": "점주 답글 수정",
+        "security": [
+          { "OwnerSession": [] },
+          { "ApiKeyAuth": [] }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "reply_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReplyCreate" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "수정된 답글이 포함된 리뷰" },
+          "400": { "description": "검증 실패" },
+          "401": { "description": "점주 로그인 또는 해당 가게 API 키 필요" },
+          "403": { "description": "이 점주 계정은 해당 가게 답글을 수정할 수 없음" },
+          "404": { "description": "리뷰 또는 답글 없음" }
+        }
+      },
       "delete": {
         "summary": "점주 답글 삭제",
         "security": [

@@ -20,6 +20,7 @@ def index(request):
             'google_maps_api_key': settings.GOOGLE_MAPS_API_KEY,
             'is_owner': bool(owner_profile),
             'owner_place_id': owner_profile.place_id if owner_profile else '',
+            'owner_place_name': owner_profile.place_name if owner_profile else '',
         },
     )
 
@@ -111,11 +112,9 @@ def review_reply(request, review_id):
     if error:
         return JsonResponse({'error': error}, status=400)
 
-    content = str(payload.get('content', '')).strip()
-    if not content:
-        return JsonResponse({'errors': {'content': 'content is required'}}, status=400)
-    if len(content) > 2000:
-        return JsonResponse({'errors': {'content': 'content must be 2000 characters or fewer'}}, status=400)
+    content, errors = validate_reply_payload(payload)
+    if errors:
+        return JsonResponse({'errors': errors}, status=400)
 
     reply = ReviewReply.objects.create(
         review=review,
@@ -128,8 +127,8 @@ def review_reply(request, review_id):
 
 @csrf_exempt
 def review_reply_detail(request, review_id, reply_id):
-    if request.method != 'DELETE':
-        return HttpResponseNotAllowed(['DELETE'])
+    if request.method not in ('PATCH', 'DELETE'):
+        return HttpResponseNotAllowed(['PATCH', 'DELETE'])
 
     try:
         review = Review.objects.get(pk=review_id)
@@ -142,6 +141,28 @@ def review_reply_detail(request, review_id, reply_id):
             return JsonResponse({'error': 'this owner account cannot delete replies for this place'}, status=403)
 
         return JsonResponse({'error': 'owner login or valid place API key is required'}, status=401)
+
+    try:
+        reply = ReviewReply.objects.get(
+            pk=reply_id,
+            review=review,
+            owner=owner_profile.user,
+        )
+    except ReviewReply.DoesNotExist:
+        return JsonResponse({'error': 'reply not found'}, status=404)
+
+    if request.method == 'PATCH':
+        payload, error = read_json_body(request)
+        if error:
+            return JsonResponse({'error': error}, status=400)
+
+        content, errors = validate_reply_payload(payload)
+        if errors:
+            return JsonResponse({'errors': errors}, status=400)
+
+        reply.content = content
+        reply.save(update_fields=['content', 'updated_at'])
+        return JsonResponse({'data': serialize_review(review)})
 
     deleted, _ = ReviewReply.objects.filter(
         pk=reply_id,
@@ -325,6 +346,16 @@ def validate_owner_signup(values, password, password_confirm):
         errors['password_confirm'] = '비밀번호가 일치하지 않습니다.'
 
     return errors
+
+
+def validate_reply_payload(payload):
+    content = str(payload.get('content', '')).strip()
+    if not content:
+        return content, {'content': 'content is required'}
+    if len(content) > 2000:
+        return content, {'content': 'content must be 2000 characters or fewer'}
+
+    return content, {}
 
 
 def has_owner_profile(user):
@@ -551,6 +582,39 @@ def build_openapi_schema():
                 },
             },
             '/api/reviews/{review_id}/reply/{reply_id}/': {
+                'patch': {
+                    'summary': '점주 답글 수정',
+                    'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
+                    'parameters': [
+                        {
+                            'name': 'review_id',
+                            'in': 'path',
+                            'required': True,
+                            'schema': {'type': 'integer'},
+                        },
+                        {
+                            'name': 'reply_id',
+                            'in': 'path',
+                            'required': True,
+                            'schema': {'type': 'integer'},
+                        },
+                    ],
+                    'requestBody': {
+                        'required': True,
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/ReplyCreate'},
+                            },
+                        },
+                    },
+                    'responses': {
+                        '200': {'description': '수정된 답글이 포함된 리뷰'},
+                        '400': {'description': '검증 실패'},
+                        '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
+                        '403': {'description': '이 점주 계정은 해당 가게 답글을 수정할 수 없음'},
+                        '404': {'description': '리뷰 또는 답글 없음'},
+                    },
+                },
                 'delete': {
                     'summary': '점주 답글 삭제',
                     'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],

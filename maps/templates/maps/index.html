@@ -35,6 +35,8 @@
         </div>
         <nav class="owner-nav" aria-label="점주 메뉴">
             {% if is_owner %}
+            <span class="owner-place-chip" title="{{ owner_place_name }}">{{ owner_place_name }}</span>
+            <button id="showOwnerPlace" class="owner-place-button" type="button">내 업장으로 이동</button>
             <a href="{% url 'maps:owner-account' %}">마이페이지</a>
             {% else %}
             <a href="{% url 'maps:owner-login' %}?next=/owner/account/">점주 로그인</a>
@@ -121,6 +123,7 @@
         window.GOOGLE_MAPS_ENABLED = {{ google_maps_api_key|yesno:"true,false" }};
         window.REVIEW_OWNER_ENABLED = {{ is_owner|yesno:"true,false" }};
         window.OWNER_PLACE_ID = "{{ owner_place_id|escapejs }}";
+        window.OWNER_PLACE_NAME = "{{ owner_place_name|escapejs }}";
     </script>
     <script src="{% static 'maps/app.js' %}"></script>
     {% if google_maps_api_key %}

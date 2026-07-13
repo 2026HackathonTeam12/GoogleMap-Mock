@@ -3,7 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from .models import OwnerProfile, Review
+from .models import OwnerProfile, Review, ReviewReply
 
 
 class MapPageTests(TestCase):
@@ -25,6 +25,22 @@ class MapPageTests(TestCase):
         self.assertContains(response, 'maps.googleapis.com/maps/api/js')
         self.assertContains(response, 'libraries=places')
         self.assertNotContains(response, 'unpkg.com/leaflet')
+
+    def test_index_shows_owner_place_navigation_when_logged_in(self):
+        owner = get_user_model().objects.create_user(username='owner', password='password')
+        OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get('/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '테스트 카페')
+        self.assertContains(response, '내 업장으로 이동')
+        self.assertContains(response, 'window.OWNER_PLACE_ID = "place\\u002D1"')
 
     def test_health_returns_ok(self):
         response = self.client.get('/health/')
@@ -268,6 +284,39 @@ class ReviewApiTests(TestCase):
 
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(delete_response.json()['data']['replies'], [])
+
+    def test_place_api_key_can_update_own_reply(self):
+        review = Review.objects.create(
+            place_id='place-1',
+            place_name='테스트 카페',
+            author_name='방문자',
+            rating=4,
+            content='다시 갈게요.',
+        )
+        owner = get_user_model().objects.create_user(username='owner', password='password')
+        profile = OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            api_key='owner-place-key',
+        )
+        reply = ReviewReply.objects.create(
+            review=review,
+            owner=owner,
+            content='수정 전 답글입니다.',
+        )
+
+        response = self.client.patch(
+            f'/api/reviews/{review.id}/reply/{reply.id}/',
+            data=json.dumps({'content': '수정된 답글입니다.'}),
+            content_type='application/json',
+            HTTP_X_API_KEY=profile.api_key,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['data']['replies'][0]['content'], '수정된 답글입니다.')
+        reply.refresh_from_db()
+        self.assertEqual(reply.content, '수정된 답글입니다.')
 
     def test_place_api_key_cannot_reply_to_other_place(self):
         review = Review.objects.create(

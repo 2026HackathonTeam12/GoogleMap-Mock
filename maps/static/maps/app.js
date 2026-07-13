@@ -11,6 +11,7 @@ const searchInput = document.querySelector('#placeSearch');
 const clearSearch = document.querySelector('#clearSearch');
 const resultsPanel = document.querySelector('#resultsPanel');
 const mapNotice = document.querySelector('#mapNotice');
+const showOwnerPlace = document.querySelector('#showOwnerPlace');
 const reviewForm = document.querySelector('#reviewForm');
 const reviewAuthor = document.querySelector('#reviewAuthor');
 const reviewRating = document.querySelector('#reviewRating');
@@ -558,6 +559,19 @@ function bindUiEvents() {
         resultsPanel.classList.remove('is-open');
         searchInput.focus();
     });
+
+    if (showOwnerPlace) {
+        showOwnerPlace.addEventListener('click', () => {
+            if (activeProvider !== 'google' || !window.OWNER_PLACE_ID) {
+                showNotice('Google Maps 장소 조회를 사용할 수 없어 내 업장으로 이동할 수 없습니다.');
+                return;
+            }
+
+            resultsPanel.classList.remove('is-open');
+            searchInput.value = window.OWNER_PLACE_NAME || '';
+            showGooglePlaceDetails(window.OWNER_PLACE_ID);
+        });
+    }
 
     searchInput.addEventListener('input', (event) => {
         window.clearTimeout(searchDebounce);
