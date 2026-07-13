@@ -874,6 +874,67 @@ input {
     margin: 0;
 }
 
+.oauth-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.oauth-actions button {
+    min-height: 38px;
+    border: 1px solid rgba(26, 115, 232, 0.22);
+    border-radius: var(--radius);
+    color: #fff;
+    background: var(--blue);
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.oauth-actions button:disabled {
+    color: var(--muted);
+    background: var(--surface-soft);
+    cursor: not-allowed;
+}
+
+.oauth-review-section {
+    margin-top: 4px;
+}
+
+.http-trace {
+    display: grid;
+    gap: 10px;
+}
+
+.trace-card {
+    display: grid;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+}
+
+.trace-card strong {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 800;
+}
+
+.trace-card pre {
+    max-height: 280px;
+    margin: 0;
+    overflow: auto;
+    color: #26323d;
+    background: var(--surface-soft);
+    border-radius: var(--radius);
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .owner-summary {
     display: grid;
     gap: 12px;

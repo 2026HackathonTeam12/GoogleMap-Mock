@@ -1,0 +1,57 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OAuth 로그인</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page oauth-page">
+    <main class="owner-shell oauth-shell">
+        <section class="owner-panel oauth-panel">
+            <header class="owner-header owner-header-stack">
+                <div>
+                    <p class="owner-kicker">OAuth 승인</p>
+                    <h1>점주 로그인</h1>
+                </div>
+            </header>
+            {% if profile %}
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>요청 앱</dt>
+                    <dd>{{ profile.place_name }}</dd>
+                </div>
+                <div>
+                    <dt>권한</dt>
+                    <dd>리뷰 조회와 답글 관리</dd>
+                </div>
+            </dl>
+            {% endif %}
+            {% if errors.oauth %}
+            <p class="owner-error">{{ errors.oauth }}</p>
+            {% endif %}
+            {% if errors.account %}
+            <p class="owner-error">{{ errors.account }}</p>
+            {% endif %}
+            <form class="owner-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="response_type" value="{{ params.response_type }}">
+                <input type="hidden" name="client_id" value="{{ params.client_id }}">
+                <input type="hidden" name="redirect_uri" value="{{ params.redirect_uri }}">
+                <input type="hidden" name="state" value="{{ params.state }}">
+                <input type="hidden" name="scope" value="{{ params.scope }}">
+                <label>
+                    <span>계정명</span>
+                    <input name="username" type="text" value="{{ values.username }}" autocomplete="username" required>
+                </label>
+                <label>
+                    <span>비밀번호</span>
+                    <input name="password" type="password" autocomplete="current-password" required>
+                </label>
+                <button type="submit">승인하고 계속</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

@@ -1,0 +1,253 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OAuth 테스트</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page oauth-page">
+    <main class="owner-shell oauth-shell">
+        <section class="owner-panel oauth-panel">
+            <header class="owner-header owner-header-stack">
+                <div>
+                    <p class="owner-kicker">OAuth 테스트</p>
+                    <h1 id="oauthPlaceName">로그인 후 내 가게 리뷰 보기</h1>
+                </div>
+                <nav class="owner-header-actions" aria-label="테스트 메뉴">
+                    <a href="{% url 'maps:index' %}">지도</a>
+                </nav>
+            </header>
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>Client ID</dt>
+                    <dd><code id="clientId">로그인 후 표시됩니다</code></dd>
+                </div>
+                <div>
+                    <dt>상태</dt>
+                    <dd id="oauthStatus">대기 중</dd>
+                </div>
+                <div>
+                    <dt>Access Token 남은 시간</dt>
+                    <dd id="accessTokenTtl">-</dd>
+                </div>
+                <div>
+                    <dt>Refresh Token 남은 시간</dt>
+                    <dd id="refreshTokenTtl">-</dd>
+                </div>
+            </dl>
+            <div class="oauth-actions">
+                <button id="loginWithOAuth" type="button">로그인 팝업 열기</button>
+                <button id="refreshAccessToken" type="button" disabled>Access Token 갱신</button>
+                <button id="revokeToken" type="button" disabled>로그아웃 처리</button>
+            </div>
+            <section class="review-section oauth-review-section" aria-labelledby="oauthReviewTitle">
+                <h2 id="oauthReviewTitle">내 가게 리뷰</h2>
+                <div id="oauthReviewList" class="review-list">
+                    <p class="review-empty">OAuth 로그인 후 리뷰가 표시됩니다.</p>
+                </div>
+            </section>
+        </section>
+    </main>
+    <script>
+        const clientIdValue = document.querySelector('#clientId');
+        const placeName = document.querySelector('#oauthPlaceName');
+        const statusText = document.querySelector('#oauthStatus');
+        const accessTokenTtl = document.querySelector('#accessTokenTtl');
+        const refreshTokenTtl = document.querySelector('#refreshTokenTtl');
+        const reviewList = document.querySelector('#oauthReviewList');
+        const loginButton = document.querySelector('#loginWithOAuth');
+        const refreshButton = document.querySelector('#refreshAccessToken');
+        const revokeButton = document.querySelector('#revokeToken');
+        let accessToken = '';
+        let refreshToken = '';
+        let clientId = '';
+        let oauthState = '';
+        let accessTokenExpiresAt = 0;
+        let refreshTokenExpiresAt = 0;
+        let tokenTimer = null;
+
+        function setStatus(message) {
+            statusText.textContent = message;
+        }
+
+        function renderReviews(reviews) {
+            if (!reviews.length) {
+                reviewList.innerHTML = '<p class="review-empty">등록된 리뷰가 없습니다.</p>';
+                return;
+            }
+
+            reviewList.innerHTML = reviews.map((review) => (
+                `<article class="review-card">
+                    <div class="review-card-head">
+                        <strong>${escapeHtml(review.author_name)}</strong>
+                        <span>${'★★★★★'.slice(0, review.rating)}${'☆☆☆☆☆'.slice(0, 5 - review.rating)}</span>
+                    </div>
+                    <p>${escapeHtml(review.content)}</p>
+                </article>`
+            )).join('');
+        }
+
+        function setTokenTimes(payload) {
+            const now = Date.now();
+            accessTokenExpiresAt = now + (Number(payload.expires_in) || 0) * 1000;
+            refreshTokenExpiresAt = now + (Number(payload.refresh_expires_in) || 0) * 1000;
+            updateTokenTimes();
+            window.clearInterval(tokenTimer);
+            tokenTimer = window.setInterval(updateTokenTimes, 1000);
+        }
+
+        function updateTokenTimes() {
+            accessTokenTtl.textContent = formatRemaining(accessTokenExpiresAt);
+            refreshTokenTtl.textContent = formatRemaining(refreshTokenExpiresAt);
+        }
+
+        function resetTokenTimes() {
+            accessTokenExpiresAt = 0;
+            refreshTokenExpiresAt = 0;
+            accessTokenTtl.textContent = '-';
+            refreshTokenTtl.textContent = '-';
+            window.clearInterval(tokenTimer);
+            tokenTimer = null;
+        }
+
+        function formatRemaining(expiresAt) {
+            if (!expiresAt) {
+                return '-';
+            }
+
+            const remainingSeconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+            const hours = Math.floor(remainingSeconds / 3600);
+            const minutes = Math.floor((remainingSeconds % 3600) / 60);
+            const seconds = remainingSeconds % 60;
+            if (hours > 0) {
+                return `${hours}시간 ${minutes}분 ${seconds}초`;
+            }
+            if (minutes > 0) {
+                return `${minutes}분 ${seconds}초`;
+            }
+            return `${seconds}초`;
+        }
+
+        function exchangeCode(code) {
+            setStatus('토큰 발급 중');
+            return fetch('/oauth/token/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'authorization_code',
+                    client_id: clientId,
+                    code,
+                    redirect_uri: `${window.location.origin}/oauth/callback/`,
+                }),
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    if (!response.ok) {
+                        throw new Error(payload.error || '토큰 발급 실패');
+                    }
+                    accessToken = payload.access_token;
+                    refreshToken = payload.refresh_token;
+                    clientId = payload.client_id || clientId;
+                    clientIdValue.textContent = clientId;
+                    placeName.textContent = payload.place_name || '내 가게 리뷰';
+                    setTokenTimes(payload);
+                    refreshButton.disabled = false;
+                    revokeButton.disabled = false;
+                    setStatus('로그인 완료');
+                    return loadReviews();
+                });
+        }
+
+        function loadReviews() {
+            return fetch('/api/reviews/', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    if (!response.ok) {
+                        throw new Error(payload.error || '리뷰 조회 실패');
+                    }
+                    renderReviews(payload.data || []);
+                });
+        }
+
+        loginButton.addEventListener('click', () => {
+            oauthState = crypto.randomUUID();
+            const params = new URLSearchParams({
+                response_type: 'code',
+                redirect_uri: `${window.location.origin}/oauth/callback/`,
+                state: oauthState,
+                scope: 'owner:reviews',
+            });
+            window.open(`/oauth/authorize/?${params.toString()}`, 'ownerOAuthLogin', 'width=460,height=640');
+            setStatus('팝업 로그인 대기 중');
+        });
+
+        refreshButton.addEventListener('click', () => {
+            setStatus('토큰 갱신 중');
+            fetch('/oauth/token/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    grant_type: 'refresh_token',
+                    client_id: clientId,
+                    refresh_token: refreshToken,
+                }),
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    if (!response.ok) {
+                        throw new Error(payload.error || '토큰 갱신 실패');
+                    }
+                    accessToken = payload.access_token;
+                    refreshToken = payload.refresh_token;
+                    setTokenTimes(payload);
+                    setStatus('토큰 갱신 완료');
+                    return loadReviews();
+                })
+                .catch((error) => setStatus(error.message));
+        });
+
+        revokeButton.addEventListener('click', () => {
+            fetch('/oauth/revoke/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: refreshToken || accessToken }),
+            })
+                .then(() => {
+                    accessToken = '';
+                    refreshToken = '';
+                    refreshButton.disabled = true;
+                    revokeButton.disabled = true;
+                    resetTokenTimes();
+                    reviewList.innerHTML = '<p class="review-empty">로그아웃 처리되었습니다.</p>';
+                    setStatus('로그아웃 처리 완료');
+                });
+        });
+
+        window.addEventListener('message', (event) => {
+            if (event.origin !== window.location.origin || event.data?.type !== 'owner-oauth-callback') {
+                return;
+            }
+            if (event.data.state !== oauthState) {
+                setStatus('state 검증 실패');
+                return;
+            }
+            clientId = event.data.clientId;
+            clientIdValue.textContent = clientId;
+            exchangeCode(event.data.code).catch((error) => setStatus(error.message));
+        });
+
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+    </script>
+</body>
+</html>

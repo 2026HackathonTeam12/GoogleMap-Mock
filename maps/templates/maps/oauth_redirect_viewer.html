@@ -1,0 +1,329 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OAuth Redirect 값 확인</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page oauth-page">
+    <main class="owner-shell oauth-shell">
+        <section class="owner-panel oauth-panel">
+            <header class="owner-header owner-header-stack">
+                <div>
+                    <p class="owner-kicker">OAuth Redirect</p>
+                    <h1>OAuth 리뷰 조회 플로우</h1>
+                </div>
+                <nav class="owner-header-actions" aria-label="테스트 메뉴">
+                    <a href="{% url 'maps:index' %}">지도</a>
+                    <a href="{% url 'maps:oauth-test-client' %}">OAuth 테스트</a>
+                </nav>
+            </header>
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>진행 상태</dt>
+                    <dd id="flowStatus">페이지 로드됨</dd>
+                </div>
+                <div>
+                    <dt>Access Token 남은 시간</dt>
+                    <dd id="accessTokenTtl">-</dd>
+                </div>
+                <div>
+                    <dt>Refresh Token 남은 시간</dt>
+                    <dd id="refreshTokenTtl">-</dd>
+                </div>
+                <div>
+                    <dt>Authorize URL</dt>
+                    <dd><code id="authorizeUrl">-</code></dd>
+                </div>
+                <div>
+                    <dt>Redirect URI</dt>
+                    <dd><code id="redirectUri">-</code></dd>
+                </div>
+            </dl>
+            <div class="oauth-actions">
+                <button id="openRedirectPopup" type="button">다시 실행</button>
+            </div>
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>Code</dt>
+                    <dd><code id="redirectCode">-</code></dd>
+                </div>
+                <div>
+                    <dt>Client ID</dt>
+                    <dd><code id="redirectClientId">-</code></dd>
+                </div>
+                <div>
+                    <dt>State</dt>
+                    <dd><code id="redirectState">-</code></dd>
+                </div>
+                <div>
+                    <dt>Error</dt>
+                    <dd><code id="redirectError">-</code></dd>
+                </div>
+                <div>
+                    <dt>Access Token</dt>
+                    <dd><code id="accessTokenValue">-</code></dd>
+                </div>
+                <div>
+                    <dt>Refresh Token</dt>
+                    <dd><code id="refreshTokenValue">-</code></dd>
+                </div>
+            </dl>
+            <section class="review-section oauth-review-section" aria-labelledby="flowReviewTitle">
+                <h2 id="flowReviewTitle">내 가게 리뷰</h2>
+                <div id="flowReviewList" class="review-list">
+                    <p class="review-empty">OAuth 플로우 완료 후 리뷰가 표시됩니다.</p>
+                </div>
+            </section>
+            <section class="review-section oauth-review-section" aria-labelledby="httpTraceTitle">
+                <h2 id="httpTraceTitle">요청 / 응답</h2>
+                <div id="httpTrace" class="http-trace"></div>
+            </section>
+        </section>
+    </main>
+    <script>
+        const openButton = document.querySelector('#openRedirectPopup');
+        const flowStatus = document.querySelector('#flowStatus');
+        const accessTokenTtl = document.querySelector('#accessTokenTtl');
+        const refreshTokenTtl = document.querySelector('#refreshTokenTtl');
+        const authorizeUrl = document.querySelector('#authorizeUrl');
+        const redirectUri = document.querySelector('#redirectUri');
+        const codeValue = document.querySelector('#redirectCode');
+        const clientIdValue = document.querySelector('#redirectClientId');
+        const stateValue = document.querySelector('#redirectState');
+        const errorValue = document.querySelector('#redirectError');
+        const accessTokenValue = document.querySelector('#accessTokenValue');
+        const refreshTokenValue = document.querySelector('#refreshTokenValue');
+        const reviewList = document.querySelector('#flowReviewList');
+        const httpTrace = document.querySelector('#httpTrace');
+        let expectedState = '';
+        let accessToken = '';
+        let refreshToken = '';
+        let clientId = '';
+        let accessTokenExpiresAt = 0;
+        let refreshTokenExpiresAt = 0;
+        let tokenTimer = null;
+
+        function setStatus(message) {
+            flowStatus.textContent = message;
+        }
+
+        function startFlow() {
+            expectedState = crypto.randomUUID();
+            const callbackUrl = `${window.location.origin}/oauth/callback/`;
+            const params = new URLSearchParams({
+                response_type: 'code',
+                redirect_uri: callbackUrl,
+                state: expectedState,
+                scope: 'owner:reviews',
+            });
+            const authUrl = `/oauth/authorize/?${params.toString()}`;
+            authorizeUrl.textContent = `${window.location.origin}${authUrl}`;
+            redirectUri.textContent = callbackUrl;
+            codeValue.textContent = '-';
+            clientIdValue.textContent = '-';
+            stateValue.textContent = expectedState;
+            errorValue.textContent = '-';
+            accessTokenValue.textContent = '-';
+            refreshTokenValue.textContent = '-';
+            reviewList.innerHTML = '<p class="review-empty">OAuth 플로우 완료 후 리뷰가 표시됩니다.</p>';
+            httpTrace.innerHTML = '';
+            resetTokenTimes();
+            setStatus('1. authorize 팝업 열기');
+            appendTrace('1. Authorization Request', {
+                request: {
+                    method: 'GET',
+                    url: `${window.location.origin}${authUrl}`,
+                    query: Object.fromEntries(params.entries()),
+                },
+                response: '브라우저 팝업에서 로그인 후 redirect_uri로 이동',
+            });
+
+            const popup = window.open(authUrl, 'ownerOAuthRedirectViewer', 'width=460,height=640');
+            if (!popup) {
+                setStatus('브라우저가 자동 팝업을 차단했습니다. 다시 실행을 누르세요.');
+                return;
+            }
+            popup.focus();
+        }
+
+        openButton.addEventListener('click', startFlow);
+
+        window.addEventListener('message', (event) => {
+            if (event.origin !== window.location.origin || event.data?.type !== 'owner-oauth-callback') {
+                return;
+            }
+            codeValue.textContent = event.data.code || '-';
+            clientIdValue.textContent = event.data.clientId || '-';
+            stateValue.textContent = event.data.state || '-';
+            errorValue.textContent = event.data.error || '-';
+            clientId = event.data.clientId || '';
+            setStatus('2. callback redirect 값 수신 완료');
+            appendTrace('2. Callback Redirect Response', {
+                response: {
+                    url: `${window.location.origin}/oauth/callback/`,
+                    query: {
+                        code: event.data.code || '',
+                        client_id: event.data.clientId || '',
+                        state: event.data.state || '',
+                        error: event.data.error || '',
+                    },
+                },
+            });
+            if (!event.data.code || !clientId) {
+                return;
+            }
+            exchangeCode(event.data.code).catch((error) => setStatus(error.message));
+        });
+
+        function exchangeCode(code) {
+            setStatus('3. authorization code를 token으로 교환 중');
+            const requestBody = {
+                grant_type: 'authorization_code',
+                client_id: clientId,
+                code,
+                redirect_uri: `${window.location.origin}/oauth/callback/`,
+            };
+            appendTrace('3. Token Request', {
+                request: {
+                    method: 'POST',
+                    url: `${window.location.origin}/oauth/token/`,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: requestBody,
+                },
+            });
+            return fetch('/oauth/token/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    appendTrace('4. Token Response', {
+                        response: {
+                            status: response.status,
+                            body: payload,
+                        },
+                    });
+                    if (!response.ok) {
+                        throw new Error(payload.error || '토큰 발급 실패');
+                    }
+                    accessToken = payload.access_token;
+                    refreshToken = payload.refresh_token;
+                    accessTokenValue.textContent = accessToken;
+                    refreshTokenValue.textContent = refreshToken;
+                    setTokenTimes(payload);
+                    setStatus('4. token 발급 완료, 리뷰 조회 중');
+                    return loadReviews();
+                });
+        }
+
+        function loadReviews() {
+            appendTrace('5. Review List Request', {
+                request: {
+                    method: 'GET',
+                    url: `${window.location.origin}/api/reviews/`,
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                },
+            });
+            return fetch('/api/reviews/', {
+                headers: { Authorization: `Bearer ${accessToken}` },
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    appendTrace('6. Review List Response', {
+                        response: {
+                            status: response.status,
+                            body: payload,
+                        },
+                    });
+                    if (!response.ok) {
+                        throw new Error(payload.error || '리뷰 조회 실패');
+                    }
+                    renderReviews(payload.data || []);
+                    setStatus('5. bearer token으로 내 가게 리뷰 조회 완료');
+                });
+        }
+
+        function renderReviews(reviews) {
+            if (!reviews.length) {
+                reviewList.innerHTML = '<p class="review-empty">등록된 리뷰가 없습니다.</p>';
+                return;
+            }
+
+            reviewList.innerHTML = reviews.map((review) => (
+                `<article class="review-card">
+                    <div class="review-card-head">
+                        <strong>${escapeHtml(review.author_name)}</strong>
+                        <span>${'★★★★★'.slice(0, review.rating)}${'☆☆☆☆☆'.slice(0, 5 - review.rating)}</span>
+                    </div>
+                    <p>${escapeHtml(review.content)}</p>
+                </article>`
+            )).join('');
+        }
+
+        function setTokenTimes(payload) {
+            const now = Date.now();
+            accessTokenExpiresAt = now + (Number(payload.expires_in) || 0) * 1000;
+            refreshTokenExpiresAt = now + (Number(payload.refresh_expires_in) || 0) * 1000;
+            updateTokenTimes();
+            window.clearInterval(tokenTimer);
+            tokenTimer = window.setInterval(updateTokenTimes, 1000);
+        }
+
+        function updateTokenTimes() {
+            accessTokenTtl.textContent = formatRemaining(accessTokenExpiresAt);
+            refreshTokenTtl.textContent = formatRemaining(refreshTokenExpiresAt);
+        }
+
+        function resetTokenTimes() {
+            accessTokenExpiresAt = 0;
+            refreshTokenExpiresAt = 0;
+            accessTokenTtl.textContent = '-';
+            refreshTokenTtl.textContent = '-';
+            window.clearInterval(tokenTimer);
+            tokenTimer = null;
+        }
+
+        function formatRemaining(expiresAt) {
+            if (!expiresAt) {
+                return '-';
+            }
+
+            const remainingSeconds = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+            const hours = Math.floor(remainingSeconds / 3600);
+            const minutes = Math.floor((remainingSeconds % 3600) / 60);
+            const seconds = remainingSeconds % 60;
+            if (hours > 0) {
+                return `${hours}시간 ${minutes}분 ${seconds}초`;
+            }
+            if (minutes > 0) {
+                return `${minutes}분 ${seconds}초`;
+            }
+            return `${seconds}초`;
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        function appendTrace(title, data) {
+            const article = document.createElement('article');
+            article.className = 'trace-card';
+            article.innerHTML = `<strong>${escapeHtml(title)}</strong><pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+            httpTrace.appendChild(article);
+        }
+
+        window.addEventListener('load', () => {
+            window.setTimeout(startFlow, 300);
+        });
+    </script>
+</body>
+</html>

@@ -1,17 +1,20 @@
 import base64
 import binascii
 import json
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.views import redirect_to_login
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import OwnerAccessToken, OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, Review, ReviewReply
 
 
 def index(request):
@@ -286,6 +289,9 @@ def owner_logout(request):
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
 
+    profile = get_user_owner_profile(request.user)
+    if profile:
+        profile.oauth_tokens.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
     logout(request)
     return redirect('maps:index')
 
@@ -298,6 +304,70 @@ def swagger_docs(request):
     return render(request, 'maps/swagger.html')
 
 
+def oauth_authorize(request):
+    params = {
+        'response_type': request.GET.get('response_type') or request.POST.get('response_type', ''),
+        'client_id': request.GET.get('client_id') or request.POST.get('client_id', ''),
+        'redirect_uri': request.GET.get('redirect_uri') or request.POST.get('redirect_uri', ''),
+        'state': request.GET.get('state') or request.POST.get('state', ''),
+        'scope': request.GET.get('scope') or request.POST.get('scope', 'owner:reviews'),
+    }
+    profile, error = validate_authorize_request(request, params)
+    current_profile = get_user_owner_profile(request.user)
+    effective_profile = profile or current_profile
+    if error:
+        return render(request, 'maps/oauth_authorize.html', {
+            'params': params,
+            'errors': {'oauth': error},
+            'values': {},
+            'profile': None,
+        }, status=400)
+    if request.method == 'GET' and not effective_profile:
+        return render(request, 'maps/oauth_authorize.html', {
+            'params': params,
+            'errors': {},
+            'values': {},
+            'profile': None,
+        })
+
+    if request.method == 'GET' and current_profile and current_profile.pk == effective_profile.pk:
+        return redirect_with_authorization_code(effective_profile, params)
+
+    if request.method == 'GET':
+        return render(request, 'maps/oauth_authorize.html', {
+            'params': params,
+            'errors': {},
+            'values': {},
+            'profile': effective_profile,
+        })
+
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['GET', 'POST'])
+
+    username = request.POST.get('username', '').strip()
+    password = request.POST.get('password', '')
+    user = authenticate(request, username=username, password=password)
+    current_profile = get_user_owner_profile(user) if user else None
+    if not current_profile or (profile and current_profile.pk != profile.pk):
+        return render(request, 'maps/oauth_authorize.html', {
+            'params': params,
+            'errors': {'account': '이 OAuth client의 점주 계정으로 로그인해주세요.'},
+            'values': {'username': username},
+            'profile': effective_profile,
+        }, status=403)
+
+    login(request, user)
+    return redirect_with_authorization_code(current_profile, params)
+
+
+def oauth_callback(request):
+    return render(request, 'maps/oauth_callback.html', {
+        'code': request.GET.get('code', ''),
+        'state': request.GET.get('state', ''),
+        'error': request.GET.get('error', ''),
+    })
+
+
 @csrf_exempt
 def oauth_token(request):
     if request.method != 'POST':
@@ -307,31 +377,51 @@ def oauth_token(request):
     if error:
         return JsonResponse({'error': error}, status=400)
 
-    grant_type = str(payload.get('grant_type', 'client_credentials')).strip()
-    if grant_type != 'client_credentials':
-        return JsonResponse({'error': 'unsupported_grant_type'}, status=400)
-
-    client_id, client_secret = get_client_credentials(request, payload)
-    if not client_id or not client_secret:
+    grant_type = str(payload.get('grant_type', '')).strip()
+    client_id = str(payload.get('client_id', '')).strip()
+    if not client_id:
+        client_id, _ = get_client_credentials(request, payload)
+    if not client_id:
         return JsonResponse({'error': 'invalid_client'}, status=401)
 
     try:
-        profile = OwnerProfile.objects.get(client_id=client_id, client_secret=client_secret)
+        profile = OwnerProfile.objects.get(client_id=client_id)
     except OwnerProfile.DoesNotExist:
         return JsonResponse({'error': 'invalid_client'}, status=401)
 
-    OwnerAccessToken.objects.filter(owner=profile, expires_at__lte=timezone.now()).delete()
-    token = OwnerAccessToken.objects.create(owner=profile)
-    expires_in = max(0, int((token.expires_at - timezone.now()).total_seconds()))
+    if grant_type == 'authorization_code':
+        return issue_token_from_authorization_code(profile, payload)
+    if grant_type == 'refresh_token':
+        return issue_token_from_refresh_token(profile, payload)
 
-    return JsonResponse({
-        'access_token': token.token,
-        'token_type': 'Bearer',
-        'expires_in': expires_in,
-        'scope': 'owner:reviews',
-        'place_id': profile.place_id,
-        'place_name': profile.place_name,
-    })
+    return JsonResponse({'error': 'unsupported_grant_type'}, status=400)
+
+
+@csrf_exempt
+def oauth_revoke(request):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    payload, error = read_request_payload(request)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+
+    token_value = str(payload.get('token', '')).strip()
+    if not token_value:
+        return JsonResponse({'error': 'token is required'}, status=400)
+
+    OwnerAccessToken.objects.filter(
+        Q(token=token_value) | Q(refresh_token=token_value),
+    ).update(revoked_at=timezone.now())
+    return JsonResponse({'data': {'revoked': True}})
+
+
+def oauth_test_client(request):
+    return render(request, 'maps/oauth_test.html')
+
+
+def oauth_redirect_viewer(request):
+    return render(request, 'maps/oauth_redirect_viewer.html')
 
 
 def read_json_body(request):
@@ -347,6 +437,109 @@ def read_request_payload(request):
         return read_json_body(request)
 
     return request.POST.dict(), None
+
+
+def validate_authorize_request(request, params):
+    if params['response_type'] != 'code':
+        return None, 'response_type must be code'
+    if not params['redirect_uri']:
+        return None, 'redirect_uri is required'
+    if not is_allowed_redirect_uri(request, params['redirect_uri']):
+        return None, 'redirect_uri is not allowed'
+    if not params['client_id']:
+        return None, None
+
+    try:
+        return OwnerProfile.objects.get(client_id=params['client_id']), None
+    except OwnerProfile.DoesNotExist:
+        return None, 'client_id is invalid'
+
+
+def is_allowed_redirect_uri(request, redirect_uri):
+    if redirect_uri.startswith('/'):
+        return True
+
+    parsed = urlparse(redirect_uri)
+    allowed_hosts = {request.get_host(), 'testserver'}
+    if parsed.hostname in {'localhost', '127.0.0.1'}:
+        allowed_hosts.add(parsed.netloc)
+
+    return url_has_allowed_host_and_scheme(
+        redirect_uri,
+        allowed_hosts=allowed_hosts,
+        require_https=False,
+    )
+
+
+def redirect_with_authorization_code(profile, params):
+    OwnerAuthorizationCode.objects.filter(owner=profile, expires_at__lte=timezone.now()).delete()
+    code = OwnerAuthorizationCode.objects.create(
+        owner=profile,
+        redirect_uri=params['redirect_uri'],
+        state=params['state'],
+    )
+    separator = '&' if '?' in params['redirect_uri'] else '?'
+    redirect_url = f'{params["redirect_uri"]}{separator}code={code.code}'
+    redirect_url = f'{redirect_url}&client_id={profile.client_id}'
+    if params['state']:
+        redirect_url = f'{redirect_url}&state={params["state"]}'
+
+    return redirect(redirect_url)
+
+
+def issue_token_from_authorization_code(profile, payload):
+    code_value = str(payload.get('code', '')).strip()
+    redirect_uri = str(payload.get('redirect_uri', '')).strip()
+    if not code_value or not redirect_uri:
+        return JsonResponse({'error': 'code and redirect_uri are required'}, status=400)
+
+    try:
+        code = OwnerAuthorizationCode.objects.get(code=code_value, owner=profile)
+    except OwnerAuthorizationCode.DoesNotExist:
+        return JsonResponse({'error': 'invalid_grant'}, status=400)
+
+    if code.is_used or code.is_expired or code.redirect_uri != redirect_uri:
+        return JsonResponse({'error': 'invalid_grant'}, status=400)
+
+    code.used_at = timezone.now()
+    code.save(update_fields=['used_at'])
+    token = OwnerAccessToken.objects.create(owner=profile)
+    return JsonResponse(build_token_response(token))
+
+
+def issue_token_from_refresh_token(profile, payload):
+    refresh_token = str(payload.get('refresh_token', '')).strip()
+    if not refresh_token:
+        return JsonResponse({'error': 'refresh_token is required'}, status=400)
+
+    try:
+        token = OwnerAccessToken.objects.get(owner=profile, refresh_token=refresh_token)
+    except OwnerAccessToken.DoesNotExist:
+        return JsonResponse({'error': 'invalid_grant'}, status=400)
+
+    if token.is_revoked or token.is_refresh_expired:
+        return JsonResponse({'error': 'invalid_grant'}, status=400)
+
+    token.revoked_at = timezone.now()
+    token.save(update_fields=['revoked_at'])
+    next_token = OwnerAccessToken.objects.create(owner=profile)
+    return JsonResponse(build_token_response(next_token))
+
+
+def build_token_response(token):
+    expires_in = max(0, int((token.expires_at - timezone.now()).total_seconds()))
+    refresh_expires_in = max(0, int((token.refresh_expires_at - timezone.now()).total_seconds()))
+    return {
+        'access_token': token.token,
+        'refresh_token': token.refresh_token,
+        'token_type': 'Bearer',
+        'expires_in': expires_in,
+        'refresh_expires_in': refresh_expires_in,
+        'scope': 'owner:reviews',
+        'client_id': token.owner.client_id,
+        'place_id': token.owner.place_id,
+        'place_name': token.owner.place_name,
+    }
 
 
 def validate_review_payload(payload):
@@ -464,7 +657,7 @@ def get_owner_profile_by_access_token(request):
     except OwnerAccessToken.DoesNotExist:
         return None
 
-    if token.is_expired:
+    if token.is_revoked or token.is_expired:
         token.delete()
         return None
 
@@ -505,11 +698,13 @@ def build_openapi_schema():
         'servers': [{'url': '/'}],
         'components': {
             'securitySchemes': {
-                'OAuthClientCredentials': {
+                'OAuthAuthorizationCode': {
                     'type': 'oauth2',
                     'flows': {
-                        'clientCredentials': {
+                        'authorizationCode': {
+                            'authorizationUrl': '/oauth/authorize/',
                             'tokenUrl': '/oauth/token/',
+                            'refreshUrl': '/oauth/token/',
                             'scopes': {
                                 'owner:reviews': '점주 가게 리뷰 조회와 답글 관리',
                             },
@@ -583,31 +778,58 @@ def build_openapi_schema():
                 },
                 'OAuthTokenRequest': {
                     'type': 'object',
-                    'required': ['grant_type', 'client_id', 'client_secret'],
                     'properties': {
-                        'grant_type': {'type': 'string', 'enum': ['client_credentials']},
+                        'grant_type': {'type': 'string', 'enum': ['authorization_code', 'refresh_token']},
                         'client_id': {'type': 'string'},
-                        'client_secret': {'type': 'string'},
+                        'code': {'type': 'string'},
+                        'redirect_uri': {'type': 'string'},
+                        'refresh_token': {'type': 'string'},
                     },
                 },
                 'OAuthTokenResponse': {
                     'type': 'object',
                     'properties': {
                         'access_token': {'type': 'string'},
+                        'refresh_token': {'type': 'string'},
                         'token_type': {'type': 'string', 'example': 'Bearer'},
                         'expires_in': {'type': 'integer'},
+                        'refresh_expires_in': {'type': 'integer'},
                         'scope': {'type': 'string'},
+                        'client_id': {'type': 'string'},
                         'place_id': {'type': 'string'},
                         'place_name': {'type': 'string'},
+                    },
+                },
+                'OAuthRevokeRequest': {
+                    'type': 'object',
+                    'required': ['token'],
+                    'properties': {
+                        'token': {'type': 'string'},
                     },
                 },
             },
         },
         'paths': {
+            '/oauth/authorize/': {
+                'get': {
+                    'summary': 'OAuth 로그인 및 authorization code 발급',
+                    'parameters': [
+                        {'name': 'response_type', 'in': 'query', 'required': True, 'schema': {'type': 'string', 'enum': ['code']}},
+                        {'name': 'client_id', 'in': 'query', 'required': False, 'schema': {'type': 'string'}},
+                        {'name': 'redirect_uri', 'in': 'query', 'required': True, 'schema': {'type': 'string'}},
+                        {'name': 'state', 'in': 'query', 'required': False, 'schema': {'type': 'string'}},
+                        {'name': 'scope', 'in': 'query', 'required': False, 'schema': {'type': 'string'}},
+                    ],
+                    'responses': {
+                        '302': {'description': 'redirect_uri로 code 전달'},
+                        '400': {'description': '잘못된 OAuth 요청'},
+                    },
+                },
+            },
             '/oauth/token/': {
                 'post': {
                     'summary': 'OAuth access token 발급',
-                    'description': '점주 Client ID와 Client Secret으로 client_credentials 토큰을 발급합니다.',
+                    'description': 'authorization code를 access token과 refresh token으로 교환하거나 refresh token으로 새 token을 발급합니다.',
                     'requestBody': {
                         'required': True,
                         'content': {
@@ -625,15 +847,44 @@ def build_openapi_schema():
                             'content': {'application/json': {'schema': {'$ref': '#/components/schemas/OAuthTokenResponse'}}},
                         },
                         '400': {'description': '지원하지 않는 grant_type 또는 잘못된 요청'},
-                        '401': {'description': 'client_id 또는 client_secret 불일치'},
+                        '401': {'description': 'client_id 불일치'},
                     },
+                },
+            },
+            '/oauth/revoke/': {
+                'post': {
+                    'summary': 'OAuth token 폐기',
+                    'requestBody': {
+                        'required': True,
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/OAuthRevokeRequest'},
+                            },
+                        },
+                    },
+                    'responses': {
+                        '200': {'description': '토큰 폐기 완료'},
+                        '400': {'description': 'token 누락'},
+                    },
+                },
+            },
+            '/oauth/test/': {
+                'get': {
+                    'summary': 'OAuth 팝업 테스트 페이지',
+                    'responses': {'200': {'description': 'OAuth 팝업 테스트 UI'}},
+                },
+            },
+            '/oauth/redirect-viewer/': {
+                'get': {
+                    'summary': 'OAuth redirect 값 확인 페이지',
+                    'responses': {'200': {'description': 'OAuth redirect 값 확인 UI'}},
                 },
             },
             '/api/reviews/': {
                 'get': {
                     'summary': '장소 리뷰 목록 조회',
                     'description': 'place_id 쿼리로 공개 조회하거나, bearer token만 보내 점주 가게 리뷰를 조회합니다.',
-                    'security': [{}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{}, {'BearerAuth': []}, {'OAuthAuthorizationCode': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'place_id',
                         'in': 'query',
@@ -692,7 +943,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/': {
                 'post': {
                     'summary': '점주 답글 작성',
-                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthAuthorizationCode': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'review_id',
                         'in': 'path',
@@ -717,7 +968,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/{reply_id}/': {
                 'patch': {
                     'summary': '점주 답글 수정',
-                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthAuthorizationCode': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',
@@ -750,7 +1001,7 @@ def build_openapi_schema():
                 },
                 'delete': {
                     'summary': '점주 답글 삭제',
-                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthAuthorizationCode': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',

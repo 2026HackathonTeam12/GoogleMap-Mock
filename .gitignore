@@ -14,7 +14,6 @@ staticfiles/
 .venv/
 venv/
 env/
-start.sh
 
 # Tooling
 .coverage

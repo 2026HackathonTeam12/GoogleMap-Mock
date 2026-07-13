@@ -1,0 +1,52 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OAuth Callback</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page oauth-page">
+    <main class="owner-shell oauth-shell">
+        <section class="owner-panel oauth-panel">
+            <header class="owner-header owner-header-stack">
+                <div>
+                    <p class="owner-kicker">OAuth Callback</p>
+                    <h1>인증 완료</h1>
+                </div>
+            </header>
+            {% if error %}
+            <p class="owner-error">{{ error }}</p>
+            {% else %}
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>Code</dt>
+                    <dd><code>{{ code }}</code></dd>
+                </div>
+                {% if state %}
+                <div>
+                    <dt>State</dt>
+                    <dd><code>{{ state }}</code></dd>
+                </div>
+                {% endif %}
+            </dl>
+            {% endif %}
+        </section>
+    </main>
+    {% if code %}
+    <script>
+        if (window.opener) {
+            window.opener.postMessage({
+                type: 'owner-oauth-callback',
+                code: '{{ code|escapejs }}',
+                clientId: '{{ request.GET.client_id|escapejs }}',
+                state: '{{ state|escapejs }}',
+                error: '{{ error|escapejs }}',
+            }, window.location.origin);
+            window.close();
+        }
+    </script>
+    {% endif %}
+</body>
+</html>

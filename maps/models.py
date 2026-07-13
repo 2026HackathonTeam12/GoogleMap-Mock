@@ -24,8 +24,24 @@ def generate_owner_access_token():
     return f'oat_{secrets.token_urlsafe(40)}'
 
 
+def generate_owner_refresh_token():
+    return f'ort_{secrets.token_urlsafe(48)}'
+
+
+def generate_owner_authorization_code():
+    return f'oac_{secrets.token_urlsafe(32)}'
+
+
 def default_token_expires_at():
-    return timezone.now() + timedelta(hours=1)
+    return timezone.now() + timedelta(minutes=15)
+
+
+def default_refresh_expires_at():
+    return timezone.now() + timedelta(days=30)
+
+
+def default_authorization_code_expires_at():
+    return timezone.now() + timedelta(minutes=5)
 
 
 class OwnerProfile(models.Model):
@@ -52,8 +68,41 @@ class OwnerProfile(models.Model):
         self.client_id = generate_owner_client_id()
         self.client_secret = generate_owner_client_secret()
         self.oauth_tokens.all().delete()
+        self.oauth_codes.all().delete()
         self.save(update_fields=['client_id', 'client_secret', 'updated_at'])
         return self.client_id, self.client_secret
+
+
+class OwnerAuthorizationCode(models.Model):
+    owner = models.ForeignKey(
+        OwnerProfile,
+        on_delete=models.CASCADE,
+        related_name='oauth_codes',
+    )
+    code = models.CharField(max_length=160, unique=True, default=generate_owner_authorization_code)
+    redirect_uri = models.URLField(max_length=500)
+    state = models.CharField(max_length=255, blank=True)
+    expires_at = models.DateTimeField(default=default_authorization_code_expires_at)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f'OAuth code for {self.owner}'
+
+    @property
+    def is_expired(self):
+        return self.expires_at <= timezone.now()
+
+    @property
+    def is_used(self):
+        return bool(self.used_at)
 
 
 class OwnerAccessToken(models.Model):
@@ -63,14 +112,19 @@ class OwnerAccessToken(models.Model):
         related_name='oauth_tokens',
     )
     token = models.CharField(max_length=160, unique=True, default=generate_owner_access_token)
+    refresh_token = models.CharField(max_length=180, unique=True, default=generate_owner_refresh_token)
     expires_at = models.DateTimeField(default=default_token_expires_at)
+    refresh_expires_at = models.DateTimeField(default=default_refresh_expires_at)
+    revoked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [
             models.Index(fields=['token']),
+            models.Index(fields=['refresh_token']),
             models.Index(fields=['expires_at']),
+            models.Index(fields=['refresh_expires_at']),
         ]
 
     def __str__(self):
@@ -79,6 +133,14 @@ class OwnerAccessToken(models.Model):
     @property
     def is_expired(self):
         return self.expires_at <= timezone.now()
+
+    @property
+    def is_refresh_expired(self):
+        return self.refresh_expires_at <= timezone.now()
+
+    @property
+    def is_revoked(self):
+        return bool(self.revoked_at)
 
 
 class Review(models.Model):

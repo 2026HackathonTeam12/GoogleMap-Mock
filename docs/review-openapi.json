@@ -12,11 +12,13 @@
   ],
   "components": {
     "securitySchemes": {
-      "OAuthClientCredentials": {
+      "OAuthAuthorizationCode": {
         "type": "oauth2",
         "flows": {
-          "clientCredentials": {
+          "authorizationCode": {
+            "authorizationUrl": "/oauth/authorize/",
             "tokenUrl": "/oauth/token/",
+            "refreshUrl": "/oauth/token/",
             "scopes": {
               "owner:reviews": "점주 가게 리뷰 조회와 답글 관리"
             }
@@ -152,22 +154,24 @@
       },
       "OAuthTokenRequest": {
         "type": "object",
-        "required": [
-          "grant_type",
-          "client_id",
-          "client_secret"
-        ],
         "properties": {
           "grant_type": {
             "type": "string",
             "enum": [
-              "client_credentials"
+              "authorization_code",
+              "refresh_token"
             ]
           },
           "client_id": {
             "type": "string"
           },
-          "client_secret": {
+          "code": {
+            "type": "string"
+          },
+          "redirect_uri": {
+            "type": "string"
+          },
+          "refresh_token": {
             "type": "string"
           }
         }
@@ -178,6 +182,9 @@
           "access_token": {
             "type": "string"
           },
+          "refresh_token": {
+            "type": "string"
+          },
           "token_type": {
             "type": "string",
             "example": "Bearer"
@@ -185,7 +192,13 @@
           "expires_in": {
             "type": "integer"
           },
+          "refresh_expires_in": {
+            "type": "integer"
+          },
           "scope": {
+            "type": "string"
+          },
+          "client_id": {
             "type": "string"
           },
           "place_id": {
@@ -195,14 +208,83 @@
             "type": "string"
           }
         }
+      },
+      "OAuthRevokeRequest": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
       }
     }
   },
   "paths": {
+    "/oauth/authorize/": {
+      "get": {
+        "summary": "OAuth 로그인 및 authorization code 발급",
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "code"
+              ]
+            }
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "redirect_uri로 code 전달"
+          },
+          "400": {
+            "description": "잘못된 OAuth 요청"
+          }
+        }
+      }
+    },
     "/oauth/token/": {
       "post": {
         "summary": "OAuth access token 발급",
-        "description": "점주 Client ID와 Client Secret으로 client_credentials 토큰을 발급합니다.",
+        "description": "authorization code를 access token과 refresh token으로 교환하거나 refresh token으로 새 token을 발급합니다.",
         "requestBody": {
           "required": true,
           "content": {
@@ -233,7 +315,50 @@
             "description": "지원하지 않는 grant_type 또는 잘못된 요청"
           },
           "401": {
-            "description": "client_id 또는 client_secret 불일치"
+            "description": "client_id 불일치"
+          }
+        }
+      }
+    },
+    "/oauth/revoke/": {
+      "post": {
+        "summary": "OAuth token 폐기",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRevokeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "토큰 폐기 완료"
+          },
+          "400": {
+            "description": "token 누락"
+          }
+        }
+      }
+    },
+    "/oauth/test/": {
+      "get": {
+        "summary": "OAuth 팝업 테스트 페이지",
+        "responses": {
+          "200": {
+            "description": "OAuth 팝업 테스트 UI"
+          }
+        }
+      }
+    },
+    "/oauth/redirect-viewer/": {
+      "get": {
+        "summary": "OAuth redirect 값 확인 페이지",
+        "responses": {
+          "200": {
+            "description": "OAuth redirect 값 확인 UI"
           }
         }
       }
@@ -248,7 +373,7 @@
             "BearerAuth": []
           },
           {
-            "OAuthClientCredentials": [
+            "OAuthAuthorizationCode": [
               "owner:reviews"
             ]
           }
@@ -349,7 +474,7 @@
             "BearerAuth": []
           },
           {
-            "OAuthClientCredentials": [
+            "OAuthAuthorizationCode": [
               "owner:reviews"
             ]
           }
@@ -398,7 +523,7 @@
             "BearerAuth": []
           },
           {
-            "OAuthClientCredentials": [
+            "OAuthAuthorizationCode": [
               "owner:reviews"
             ]
           }
@@ -459,7 +584,7 @@
             "BearerAuth": []
           },
           {
-            "OAuthClientCredentials": [
+            "OAuthAuthorizationCode": [
               "owner:reviews"
             ]
           }

@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import OwnerAccessToken, OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, Review, ReviewReply
 
 
 class ReviewReplyInline(admin.StackedInline):
@@ -33,4 +33,11 @@ class ReviewReplyAdmin(admin.ModelAdmin):
 class OwnerAccessTokenAdmin(admin.ModelAdmin):
     list_display = ('owner', 'expires_at', 'created_at')
     search_fields = ('owner__place_id', 'owner__place_name', 'token')
-    readonly_fields = ('token', 'created_at')
+    readonly_fields = ('token', 'refresh_token', 'created_at')
+
+
+@admin.register(OwnerAuthorizationCode)
+class OwnerAuthorizationCodeAdmin(admin.ModelAdmin):
+    list_display = ('owner', 'redirect_uri', 'expires_at', 'used_at', 'created_at')
+    search_fields = ('owner__place_id', 'owner__place_name', 'code', 'redirect_uri')
+    readonly_fields = ('code', 'created_at')
