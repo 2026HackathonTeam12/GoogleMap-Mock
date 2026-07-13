@@ -1,0 +1,191 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Google Map Mockup 지도 Review API",
+    "version": "1.0.0",
+    "description": "장소 리뷰 작성, 조회, 점주 답글 API입니다."
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "점주 계정별로 생성된 가게 API 키입니다. 해당 키의 가게 리뷰에만 답글을 달 수 있습니다."
+      },
+      "OwnerSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "sessionid",
+        "description": "OwnerProfile이 연결된 점주 계정 로그인 세션입니다."
+      }
+    },
+    "schemas": {
+      "Review": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "place_id": { "type": "string" },
+          "place_name": { "type": "string" },
+          "author_name": { "type": "string" },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "content": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "reply": {
+            "nullable": true,
+            "type": "object",
+            "properties": {
+              "content": { "type": "string" },
+              "owner_name": { "type": "string" },
+              "created_at": { "type": "string", "format": "date-time" },
+              "updated_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        }
+      },
+      "ReviewCreate": {
+        "type": "object",
+        "required": ["place_id", "place_name", "author_name", "rating", "content", "delete_password"],
+        "properties": {
+          "place_id": { "type": "string" },
+          "place_name": { "type": "string" },
+          "author_name": { "type": "string", "maxLength": 80 },
+          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+          "content": { "type": "string", "maxLength": 2000 },
+          "delete_password": { "type": "string", "minLength": 4 }
+        }
+      },
+      "ReviewDelete": {
+        "type": "object",
+        "required": ["delete_password"],
+        "properties": {
+          "delete_password": { "type": "string" }
+        }
+      },
+      "ReplyCreate": {
+        "type": "object",
+        "required": ["content"],
+        "properties": {
+          "content": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/reviews/": {
+      "get": {
+        "summary": "장소 리뷰 목록 조회",
+        "description": "place_id 쿼리로 공개 조회하거나, X-API-Key만 보내 점주 가게 리뷰를 조회합니다.",
+        "security": [
+          {},
+          { "ApiKeyAuth": [] }
+        ],
+        "parameters": [
+          {
+            "name": "place_id",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "리뷰 목록" },
+          "400": { "description": "place_id 또는 유효한 가게 API 키 누락" }
+        }
+      },
+      "post": {
+        "summary": "리뷰 작성",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReviewCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "작성된 리뷰" },
+          "400": { "description": "검증 실패" }
+        }
+      }
+    },
+    "/api/reviews/{review_id}/": {
+      "delete": {
+        "summary": "리뷰 삭제",
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReviewDelete" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "삭제 완료" },
+          "403": { "description": "삭제 비밀번호 불일치" },
+          "404": { "description": "리뷰 없음" }
+        }
+      }
+    },
+    "/api/reviews/{review_id}/reply/": {
+      "post": {
+        "summary": "점주 답글 작성 또는 수정",
+        "security": [
+          { "OwnerSession": [] },
+          { "ApiKeyAuth": [] }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ReplyCreate" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "답글이 포함된 리뷰" },
+          "401": { "description": "점주 로그인 또는 해당 가게 API 키 필요" },
+          "403": { "description": "이 점주 계정은 해당 가게에 답글을 달 수 없음" },
+          "404": { "description": "리뷰 없음" }
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "summary": "OpenAPI 문서",
+        "responses": {
+          "200": { "description": "OpenAPI 3.0 schema" }
+        }
+      }
+    },
+    "/api/docs/": {
+      "get": {
+        "summary": "Swagger UI 문서",
+        "responses": {
+          "200": { "description": "Swagger UI page" }
+        }
+      }
+    }
+  }
+}

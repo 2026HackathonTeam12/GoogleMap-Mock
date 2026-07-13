@@ -1,0 +1,56 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>점주 가입</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page">
+    <main class="owner-shell">
+        <section class="owner-panel">
+            <header class="owner-header">
+                <h1>점주 가입</h1>
+                <a href="{% url 'maps:owner-login' %}">로그인</a>
+            </header>
+            {% if errors.account %}
+            <p class="owner-error">{{ errors.account }}</p>
+            {% endif %}
+            <form class="owner-form" method="post">
+                {% csrf_token %}
+                <label>
+                    <span>계정명</span>
+                    <input name="username" value="{{ values.username }}" autocomplete="username" required>
+                    {% if errors.username %}<small>{{ errors.username }}</small>{% endif %}
+                </label>
+                <label>
+                    <span>비밀번호</span>
+                    <input name="password" type="password" autocomplete="new-password" required>
+                    {% if errors.password %}<small>{{ errors.password }}</small>{% endif %}
+                </label>
+                <label>
+                    <span>비밀번호 확인</span>
+                    <input name="password_confirm" type="password" autocomplete="new-password" required>
+                    {% if errors.password_confirm %}<small>{{ errors.password_confirm }}</small>{% endif %}
+                </label>
+                <label>
+                    <span>가게 위치 ID</span>
+                    <input id="ownerPlaceId" name="place_id" value="{{ values.place_id }}" {% if values.place_id %}readonly{% endif %} required>
+                    {% if errors.place_id %}<small>{{ errors.place_id }}</small>{% endif %}
+                </label>
+                <label>
+                    <span>가게명</span>
+                    <input id="ownerPlaceName" name="place_name" value="{{ values.place_name }}" placeholder="비워두면 위치 ID로 저장됩니다" {% if values.place_name %}readonly{% endif %}>
+                    {% if errors.place_name %}<small>{{ errors.place_name }}</small>{% endif %}
+                </label>
+                <label>
+                    <span>주소</span>
+                    <input id="ownerPlaceAddress" name="place_address" value="{{ values.place_address }}">
+                </label>
+                <button type="submit">가입하고 API 키 만들기</button>
+            </form>
+        </section>
+    </main>
+</body>
+</html>

@@ -16,10 +16,16 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-MySQL 접속 정보는 환경변수로 지정합니다.
+프로젝트 실행은 `start.sh`로 시작합니다. 이 파일은 로컬 환경변수와 마이그레이션 실행을 포함하며 Git에는 포함하지 않습니다.
 
 ```bash
-export MYSQL_DATABASE="mock_map"
+./start.sh
+```
+
+직접 실행할 때는 MySQL 접속 정보를 환경변수로 지정합니다.
+
+```bash
+export MYSQL_DATABASE="googlemap"
 export MYSQL_USER="root"
 export MYSQL_PASSWORD="your-password"
 export MYSQL_HOST="127.0.0.1"
@@ -37,8 +43,28 @@ python manage.py runserver
 
 키가 없으면 개발 확인용 OpenStreetMap 지도로 표시됩니다. Google Maps의 실제 장소 클릭과 검색은 API 키가 있을 때만 동작합니다.
 
+## Reviews
+
+- 사용자는 지도에서 장소를 선택한 뒤 상세 패널에서 리뷰를 작성할 수 있습니다.
+- 점주는 `/owner/signup/`에서 계정을 만들면서 자신의 가게 위치 ID를 등록합니다. 가게명은 선택 항목입니다.
+- 지도에서 가게를 선택한 뒤 상세 패널의 `점주로 등록하기`를 누르면 해당 가게 정보가 채워진 가입 화면으로 이동합니다.
+- 점주 답글은 해당 가게를 가진 점주 로그인 세션 또는 점주 계정별 `X-API-Key`로만 작성할 수 있습니다.
+- API 키는 `/owner/account/`에서 확인하고 재발급할 수 있습니다.
+- 점주 웹 로그인은 `/owner/login/`에서 시작하며 로그인 후 `/owner/account/`로 이동합니다.
+- OpenAPI 문서는 `GET /api/openapi.json` 또는 [docs/review-openapi.json](docs/review-openapi.json)에서 확인할 수 있습니다.
+- Swagger UI는 `/api/docs/`에서 확인할 수 있고, 우측 상단 `Authorize`에서 `X-API-Key` 값을 넣어 테스트합니다.
+- `GET /api/reviews/`는 `place_id` 쿼리 없이도 점주 `X-API-Key`만 보내면 해당 가게의 리뷰를 반환합니다.
+
 ## Endpoints
 
-- `GET /` - service status
+- `GET /` - map page
 - `GET /health/` - health check
 - `GET /admin/` - Django admin
+- `GET /owner/signup/` - owner signup with place selection
+- `GET /owner/account/` - owner API key page
+- `GET /api/reviews/?place_id={place_id}` - review list
+- `POST /api/reviews/` - create review
+- `DELETE /api/reviews/{review_id}/` - delete review with password
+- `POST /api/reviews/{review_id}/reply/` - owner reply
+- `GET /api/openapi.json` - OpenAPI 3.0 review API schema
+- `GET /api/docs/` - Swagger UI

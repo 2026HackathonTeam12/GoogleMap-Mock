@@ -1,0 +1,74 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>점주 API 키</title>
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body class="owner-page">
+    <main class="owner-shell">
+        <section class="owner-panel">
+            <header class="owner-header owner-header-stack">
+                <div>
+                    <p class="owner-kicker">점주 계정</p>
+                    <h1>마이페이지</h1>
+                </div>
+                <nav class="owner-header-actions" aria-label="계정 메뉴">
+                    <a href="{% url 'maps:index' %}">지도</a>
+                    <form method="post" action="{% url 'maps:owner-logout' %}">
+                        {% csrf_token %}
+                        <button type="submit">로그아웃</button>
+                    </form>
+                </nav>
+            </header>
+            <dl class="owner-summary">
+                <div>
+                    <dt>가게</dt>
+                    <dd>{{ profile.place_name }}</dd>
+                </div>
+                <div>
+                    <dt>위치 ID</dt>
+                    <dd>{{ profile.place_id }}</dd>
+                </div>
+                <div>
+                    <dt>API 키</dt>
+                    <dd>
+                        <div class="api-key-box">
+                            <code id="ownerApiKey" data-api-key="{{ profile.api_key }}">••••••••••••••••••••••••••••</code>
+                            <button id="toggleApiKey" type="button" aria-controls="ownerApiKey" aria-pressed="false">보이기</button>
+                            <button id="copyApiKey" type="button">복사</button>
+                        </div>
+                    </dd>
+                </div>
+            </dl>
+            <form class="owner-key-form" method="post">
+                {% csrf_token %}
+                <button class="owner-danger" type="submit">API 키 재발급</button>
+            </form>
+        </section>
+    </main>
+    <script>
+        const keyValue = document.querySelector('#ownerApiKey');
+        const toggleButton = document.querySelector('#toggleApiKey');
+        const copyButton = document.querySelector('#copyApiKey');
+        const masked = '••••••••••••••••••••••••••••';
+
+        toggleButton.addEventListener('click', () => {
+            const isVisible = toggleButton.getAttribute('aria-pressed') === 'true';
+            keyValue.textContent = isVisible ? masked : keyValue.dataset.apiKey;
+            toggleButton.textContent = isVisible ? '보이기' : '숨기기';
+            toggleButton.setAttribute('aria-pressed', String(!isVisible));
+        });
+
+        copyButton.addEventListener('click', async () => {
+            await navigator.clipboard.writeText(keyValue.dataset.apiKey);
+            copyButton.textContent = '복사됨';
+            window.setTimeout(() => {
+                copyButton.textContent = '복사';
+            }, 1400);
+        });
+    </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ let placesService;
 let selectedMarker;
 let searchDebounce;
 let activeProvider = null;
+let selectedPlace = null;
 
 const panel = document.querySelector('#placePanel');
 const closePanel = document.querySelector('#closePanel');
@@ -10,6 +11,13 @@ const searchInput = document.querySelector('#placeSearch');
 const clearSearch = document.querySelector('#clearSearch');
 const resultsPanel = document.querySelector('#resultsPanel');
 const mapNotice = document.querySelector('#mapNotice');
+const reviewForm = document.querySelector('#reviewForm');
+const reviewAuthor = document.querySelector('#reviewAuthor');
+const reviewRating = document.querySelector('#reviewRating');
+const reviewContent = document.querySelector('#reviewContent');
+const reviewDeletePassword = document.querySelector('#reviewDeletePassword');
+const reviewMessage = document.querySelector('#reviewMessage');
+const reviewList = document.querySelector('#reviewList');
 
 window.initGoogleMap = function initGoogleMap() {
     activeProvider = 'google';
@@ -142,14 +150,19 @@ function normalizeGooglePlace(place) {
     const openNow = place.opening_hours?.isOpen?.();
     const hours = formatOpeningHours(place.opening_hours?.weekday_text, openNow);
     const contact = place.formatted_phone_number || '연락처 정보 없음';
+    const placeId = place.place_id;
+    const name = place.name || '이름 없는 장소';
+    const address = place.formatted_address || '주소 정보 없음';
     const actions = [
-        place.website ? { label: '공식 사이트', url: place.website } : null,
+        place.website ? { label: '공식 사이트', url: place.website, external: true } : null,
+        placeId ? { label: '점주로 등록하기', url: buildOwnerSignupUrl(placeId, name, address), external: false } : null,
     ].filter(Boolean);
 
     return {
-        name: place.name || '이름 없는 장소',
+        placeId,
+        name,
         category: primaryType,
-        address: place.formatted_address || '주소 정보 없음',
+        address,
         description: place.business_status ? `상태: ${formatBusinessStatus(place.business_status)}` : '상세 정보가 준비되어 있습니다.',
         hours,
         contact,
@@ -158,6 +171,7 @@ function normalizeGooglePlace(place) {
 }
 
 function renderPlaceDetails(place) {
+    selectedPlace = place;
     document.querySelector('#placeCategory').textContent = place.category;
     document.querySelector('#placeName').textContent = place.name;
     document.querySelector('#placeAddress').textContent = place.address;
@@ -165,11 +179,12 @@ function renderPlaceDetails(place) {
     document.querySelector('#placeHours').innerHTML = place.hours;
     document.querySelector('#placeTip').textContent = place.contact;
     document.querySelector('#placeActions').innerHTML = place.actions.map((action) => (
-        `<a class="action-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer" aria-label="${escapeHtml(action.label)} 새 창 열기">${escapeHtml(action.label)}</a>`
+        `<a class="action-link" href="${escapeHtml(action.url)}"${action.external ? ' target="_blank" rel="noreferrer"' : ''} aria-label="${escapeHtml(action.label)}${action.external ? ' 새 창 열기' : ''}">${escapeHtml(action.label)}</a>`
     )).join('');
 
     panel.classList.add('is-open');
     panel.setAttribute('aria-hidden', 'false');
+    loadReviews(place.placeId);
 }
 
 function renderResults(results) {
@@ -186,6 +201,84 @@ function renderResults(results) {
 function renderMessage(message) {
     resultsPanel.innerHTML = `<p class="result-message">${escapeHtml(message)}</p>`;
     resultsPanel.classList.add('is-open');
+}
+
+function buildOwnerSignupUrl(placeId, placeName, placeAddress) {
+    const params = new URLSearchParams({
+        place_id: placeId,
+        place_name: placeName,
+        place_address: placeAddress,
+    });
+
+    return `/owner/signup/?${params.toString()}`;
+}
+
+function loadReviews(placeId) {
+    if (!placeId) {
+        renderReviews([]);
+        return;
+    }
+
+    fetch(`/api/reviews/?place_id=${encodeURIComponent(placeId)}`)
+        .then((response) => response.json())
+        .then((payload) => {
+            renderReviews(payload.data || []);
+        })
+        .catch(() => {
+            showReviewMessage('리뷰를 불러오지 못했습니다.', true);
+        });
+}
+
+function renderReviews(reviews) {
+    if (!reviews.length) {
+        reviewList.innerHTML = '<p class="review-empty">아직 등록된 리뷰가 없습니다.</p>';
+        return;
+    }
+
+    reviewList.innerHTML = reviews.map((review) => (
+        `<article class="review-card" data-review-id="${review.id}">
+            <div class="review-card-head">
+                <strong>${escapeHtml(review.author_name)}</strong>
+                <span>${buildOwnStars(review.rating)}</span>
+            </div>
+            <p>${escapeHtml(review.content)}</p>
+            ${review.reply ? renderReply(review.reply) : ''}
+            ${renderDeleteForm(review.id)}
+            ${window.REVIEW_OWNER_ENABLED ? renderReplyForm(review.id, review.reply) : ''}
+        </article>`
+    )).join('');
+}
+
+function renderReply(reply) {
+    return `<div class="owner-reply">
+        <strong>점주 답글</strong>
+        <p>${escapeHtml(reply.content)}</p>
+    </div>`;
+}
+
+function renderReplyForm(reviewId, reply) {
+    return `<form class="reply-form" data-review-id="${reviewId}">
+        <textarea name="content" rows="2" maxlength="2000" required>${reply ? escapeHtml(reply.content) : ''}</textarea>
+        <button type="submit">${reply ? '수정' : '답글'}</button>
+    </form>`;
+}
+
+function renderDeleteForm(reviewId) {
+    return `<form class="delete-review-form" data-review-id="${reviewId}">
+        <input name="delete_password" type="password" minlength="4" placeholder="삭제 비밀번호" required>
+        <button type="submit">삭제</button>
+    </form>`;
+}
+
+function buildOwnStars(rating) {
+    const value = Number(rating) || 0;
+    return '★★★★★'.slice(0, value) + '☆☆☆☆☆'.slice(0, 5 - value);
+}
+
+function showReviewMessage(message, isError = false) {
+    reviewMessage.textContent = message;
+    reviewMessage.hidden = false;
+    reviewMessage.classList.toggle('is-error', isError);
 }
 
 function formatOpeningHours(weekdayText, openNow) {
@@ -296,6 +389,102 @@ function showNotice(message) {
 
 function bindUiEvents() {
     closePanel.addEventListener('click', closePlacePanel);
+
+    reviewForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!selectedPlace?.placeId) {
+            showReviewMessage('장소를 먼저 선택해주세요.', true);
+            return;
+        }
+
+        fetch('/api/reviews/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                place_id: selectedPlace.placeId,
+                place_name: selectedPlace.name,
+                author_name: reviewAuthor.value,
+                rating: reviewRating.value,
+                content: reviewContent.value,
+                delete_password: reviewDeletePassword.value,
+            }),
+        })
+            .then((response) => response.json().then((payload) => ({ response, payload })))
+            .then(({ response, payload }) => {
+                if (!response.ok) {
+                    throw new Error(payload.error || '리뷰 등록에 실패했습니다.');
+                }
+
+                reviewContent.value = '';
+                reviewDeletePassword.value = '';
+                showReviewMessage('리뷰가 등록되었습니다.');
+                loadReviews(selectedPlace.placeId);
+            })
+            .catch((error) => {
+                showReviewMessage(error.message, true);
+            });
+    });
+
+    reviewList.addEventListener('submit', (event) => {
+        const deleteForm = event.target.closest('.delete-review-form');
+        if (deleteForm) {
+            event.preventDefault();
+            const reviewId = deleteForm.dataset.reviewId;
+            const deletePassword = deleteForm.elements.delete_password.value;
+
+            fetch(`/api/reviews/${reviewId}/`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ delete_password: deletePassword }),
+            })
+                .then((response) => response.json().then((payload) => ({ response, payload })))
+                .then(({ response, payload }) => {
+                    if (!response.ok) {
+                        throw new Error(payload.error || '리뷰 삭제에 실패했습니다.');
+                    }
+
+                    showReviewMessage('리뷰가 삭제되었습니다.');
+                    loadReviews(selectedPlace.placeId);
+                })
+                .catch((error) => {
+                    showReviewMessage(error.message, true);
+                });
+            return;
+        }
+
+        const form = event.target.closest('.reply-form');
+        if (!form) {
+            return;
+        }
+
+        event.preventDefault();
+        const reviewId = form.dataset.reviewId;
+        const content = form.elements.content.value;
+
+        fetch(`/api/reviews/${reviewId}/reply/`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ content }),
+        })
+            .then((response) => response.json().then((payload) => ({ response, payload })))
+            .then(({ response, payload }) => {
+                if (!response.ok) {
+                    throw new Error(payload.error || '답글 저장에 실패했습니다.');
+                }
+
+                showReviewMessage('답글이 저장되었습니다.');
+                loadReviews(selectedPlace.placeId);
+            })
+            .catch((error) => {
+                showReviewMessage(error.message, true);
+            });
+    });
 
     clearSearch.addEventListener('click', () => {
         searchInput.value = '';

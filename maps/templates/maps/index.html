@@ -33,6 +33,13 @@
                 <span aria-hidden="true">×</span>
             </button>
         </div>
+        <nav class="owner-nav" aria-label="점주 메뉴">
+            {% if is_owner %}
+            <a href="{% url 'maps:owner-account' %}">마이페이지</a>
+            {% else %}
+            <a href="{% url 'maps:owner-login' %}?next=/owner/account/">점주 로그인</a>
+            {% endif %}
+        </nav>
 
         <aside id="placePanel" class="place-panel" aria-labelledby="placeName" aria-hidden="true">
             <button id="closePanel" class="panel-close" type="button" aria-label="닫기">
@@ -56,6 +63,41 @@
                         <dd id="placeTip"></dd>
                     </div>
                 </dl>
+                <section class="review-section" aria-labelledby="reviewTitle">
+                    <div class="review-heading">
+                        <h2 id="reviewTitle">리뷰</h2>
+                        {% if is_owner %}
+                        <span class="owner-badge">점주</span>
+                        {% endif %}
+                    </div>
+                    <form id="reviewForm" class="review-form">
+                        <label>
+                            <span>이름</span>
+                            <input id="reviewAuthor" name="author_name" type="text" maxlength="80" autocomplete="name" required>
+                        </label>
+                        <label>
+                            <span>평점</span>
+                            <select id="reviewRating" name="rating" required>
+                                <option value="5">5</option>
+                                <option value="4">4</option>
+                                <option value="3">3</option>
+                                <option value="2">2</option>
+                                <option value="1">1</option>
+                            </select>
+                        </label>
+                        <label class="review-text">
+                            <span>내용</span>
+                            <textarea id="reviewContent" name="content" rows="3" maxlength="2000" required></textarea>
+                        </label>
+                        <label class="review-text">
+                            <span>삭제 비밀번호</span>
+                            <input id="reviewDeletePassword" name="delete_password" type="password" minlength="4" autocomplete="new-password" required>
+                        </label>
+                        <button class="review-submit" type="submit">등록</button>
+                    </form>
+                    <div id="reviewMessage" class="review-message" hidden></div>
+                    <div id="reviewList" class="review-list"></div>
+                </section>
             </div>
         </aside>
 
@@ -66,6 +108,7 @@
 
     <script>
         window.GOOGLE_MAPS_ENABLED = {{ google_maps_api_key|yesno:"true,false" }};
+        window.REVIEW_OWNER_ENABLED = {{ is_owner|yesno:"true,false" }};
     </script>
     <script src="{% static 'maps/app.js' %}"></script>
     {% if google_maps_api_key %}
