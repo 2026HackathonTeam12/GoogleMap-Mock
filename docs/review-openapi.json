@@ -23,6 +23,12 @@
           }
         }
       },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "OAuth access token",
+        "description": "/oauth/token/에서 발급받은 access_token을 입력합니다."
+      },
       "OwnerSession": {
         "type": "apiKey",
         "in": "cookie",
@@ -239,6 +245,9 @@
         "security": [
           {},
           {
+            "BearerAuth": []
+          },
+          {
             "OAuthClientCredentials": [
               "owner:reviews"
             ]
@@ -337,6 +346,9 @@
             "OwnerSession": []
           },
           {
+            "BearerAuth": []
+          },
+          {
             "OAuthClientCredentials": [
               "owner:reviews"
             ]
@@ -381,6 +393,9 @@
         "security": [
           {
             "OwnerSession": []
+          },
+          {
+            "BearerAuth": []
           },
           {
             "OAuthClientCredentials": [
@@ -439,6 +454,9 @@
         "security": [
           {
             "OwnerSession": []
+          },
+          {
+            "BearerAuth": []
           },
           {
             "OAuthClientCredentials": [

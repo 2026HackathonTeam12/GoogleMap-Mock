@@ -516,6 +516,12 @@ def build_openapi_schema():
                         },
                     },
                 },
+                'BearerAuth': {
+                    'type': 'http',
+                    'scheme': 'bearer',
+                    'bearerFormat': 'OAuth access token',
+                    'description': '/oauth/token/에서 발급받은 access_token을 입력합니다.',
+                },
                 'OwnerSession': {
                     'type': 'apiKey',
                     'in': 'cookie',
@@ -627,7 +633,7 @@ def build_openapi_schema():
                 'get': {
                     'summary': '장소 리뷰 목록 조회',
                     'description': 'place_id 쿼리로 공개 조회하거나, bearer token만 보내 점주 가게 리뷰를 조회합니다.',
-                    'security': [{}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'place_id',
                         'in': 'query',
@@ -686,7 +692,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/': {
                 'post': {
                     'summary': '점주 답글 작성',
-                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'review_id',
                         'in': 'path',
@@ -711,7 +717,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/{reply_id}/': {
                 'patch': {
                     'summary': '점주 답글 수정',
-                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',
@@ -744,7 +750,7 @@ def build_openapi_schema():
                 },
                 'delete': {
                     'summary': '점주 답글 삭제',
-                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
+                    'security': [{'OwnerSession': []}, {'BearerAuth': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',
