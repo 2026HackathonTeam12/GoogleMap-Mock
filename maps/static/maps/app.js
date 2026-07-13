@@ -113,10 +113,7 @@ function showGooglePlaceDetails(placeId, position = null) {
                 'name',
                 'opening_hours',
                 'place_id',
-                'rating',
                 'types',
-                'url',
-                'user_ratings_total',
                 'website',
             ],
         },
@@ -141,24 +138,17 @@ function showGooglePlaceDetails(placeId, position = null) {
 }
 
 function normalizeGooglePlace(place) {
-    const rating = typeof place.rating === 'number' ? place.rating : null;
-    const reviewText = place.user_ratings_total
-        ? `리뷰 ${place.user_ratings_total.toLocaleString()}개`
-        : '리뷰 정보 없음';
     const primaryType = formatPlaceType(place.types?.[0]);
     const openNow = place.opening_hours?.isOpen?.();
     const hours = formatOpeningHours(place.opening_hours?.weekday_text, openNow);
     const contact = place.formatted_phone_number || '연락처 정보 없음';
     const actions = [
-        place.url ? { label: '지도에서 보기', url: place.url } : null,
         place.website ? { label: '공식 사이트', url: place.website } : null,
     ].filter(Boolean);
 
     return {
         name: place.name || '이름 없는 장소',
         category: primaryType,
-        rating,
-        reviewText,
         address: place.formatted_address || '주소 정보 없음',
         description: place.business_status ? `상태: ${formatBusinessStatus(place.business_status)}` : '상세 정보가 준비되어 있습니다.',
         hours,
@@ -170,9 +160,6 @@ function normalizeGooglePlace(place) {
 function renderPlaceDetails(place) {
     document.querySelector('#placeCategory').textContent = place.category;
     document.querySelector('#placeName').textContent = place.name;
-    document.querySelector('#placeRating').textContent = place.rating ? place.rating.toFixed(1) : '-';
-    document.querySelector('#placeStars').textContent = place.rating ? buildStars(place.rating) : '';
-    document.querySelector('#placeReviews').textContent = place.reviewText;
     document.querySelector('#placeAddress').textContent = place.address;
     document.querySelector('#placeDescription').textContent = place.description;
     document.querySelector('#placeHours').innerHTML = place.hours;
@@ -199,11 +186,6 @@ function renderResults(results) {
 function renderMessage(message) {
     resultsPanel.innerHTML = `<p class="result-message">${escapeHtml(message)}</p>`;
     resultsPanel.classList.add('is-open');
-}
-
-function buildStars(rating) {
-    const rounded = Math.round(rating);
-    return '★★★★★'.slice(0, rounded) + '☆☆☆☆☆'.slice(0, 5 - rounded);
 }
 
 function formatOpeningHours(weekdayText, openNow) {

@@ -6,6 +6,7 @@ Django 기반 Google Map mock 프로젝트입니다.
 
 - Python 3.13+
 - Django 6.0+
+- MySQL 8+
 
 ## Quick start
 
@@ -13,6 +14,16 @@ Django 기반 Google Map mock 프로젝트입니다.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+MySQL 접속 정보는 환경변수로 지정합니다.
+
+```bash
+export MYSQL_DATABASE="mock_map"
+export MYSQL_USER="root"
+export MYSQL_PASSWORD="your-password"
+export MYSQL_HOST="127.0.0.1"
+export MYSQL_PORT="3306"
 python manage.py migrate
 python manage.py runserver
 ```
