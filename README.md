@@ -48,12 +48,14 @@ python manage.py runserver
 - 사용자는 지도에서 장소를 선택한 뒤 상세 패널에서 리뷰를 작성할 수 있습니다.
 - 점주는 `/owner/signup/`에서 계정을 만들면서 자신의 가게 위치 ID를 등록합니다. 가게명은 선택 항목입니다.
 - 지도에서 가게를 선택한 뒤 상세 패널의 `점주로 등록하기`를 누르면 해당 가게 정보가 채워진 가입 화면으로 이동합니다.
-- 점주 답글은 해당 가게를 가진 점주 로그인 세션 또는 점주 계정별 `X-API-Key`로만 작성할 수 있습니다.
-- API 키는 `/owner/account/`에서 확인하고 재발급할 수 있습니다.
+- 점주 답글은 해당 가게를 가진 점주 로그인 세션 또는 OAuth bearer token으로만 작성할 수 있습니다.
+- OAuth `client_id`와 `client_secret`은 `/owner/account/`에서 확인하고 재발급할 수 있습니다.
 - 점주 웹 로그인은 `/owner/login/`에서 시작하며 로그인 후 `/owner/account/`로 이동합니다.
+- API 명세는 [docs/review-api.md](docs/review-api.md)에서 확인할 수 있습니다.
 - OpenAPI 문서는 `GET /api/openapi.json` 또는 [docs/review-openapi.json](docs/review-openapi.json)에서 확인할 수 있습니다.
-- Swagger UI는 `/api/docs/`에서 확인할 수 있고, 우측 상단 `Authorize`에서 `X-API-Key` 값을 넣어 테스트합니다.
-- `GET /api/reviews/`는 `place_id` 쿼리 없이도 점주 `X-API-Key`만 보내면 해당 가게의 리뷰를 반환합니다.
+- Swagger UI는 `/api/docs/`에서 확인할 수 있고, `client_credentials` 토큰 발급 후 bearer token으로 보호 API를 테스트합니다.
+- `POST /oauth/token/`은 점주 `client_id`와 `client_secret`으로 access token을 발급합니다.
+- `GET /api/reviews/`는 `place_id` 쿼리 없이도 점주 bearer token만 보내면 해당 가게의 리뷰를 반환합니다.
 
 ## Endpoints
 
@@ -61,7 +63,8 @@ python manage.py runserver
 - `GET /health/` - health check
 - `GET /admin/` - Django admin
 - `GET /owner/signup/` - owner signup with place selection
-- `GET /owner/account/` - owner API key page
+- `GET /owner/account/` - owner OAuth credential page
+- `POST /oauth/token/` - issue owner OAuth access token with client credentials
 - `GET /api/reviews/?place_id={place_id}` - review list
 - `POST /api/reviews/` - create review
 - `DELETE /api/reviews/{review_id}/` - delete review with password

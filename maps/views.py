@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 
 from django.conf import settings
@@ -6,9 +8,10 @@ from django.contrib.auth.views import redirect_to_login
 from django.db import IntegrityError, transaction
 from django.http import HttpResponseNotAllowed, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerProfile, Review, ReviewReply
 
 
 def index(request):
@@ -34,9 +37,9 @@ def review_collection(request):
     if request.method == 'GET':
         place_id = request.GET.get('place_id', '').strip()
         if not place_id:
-            owner_profile = get_owner_profile_by_api_key(request)
+            owner_profile = get_owner_profile_by_access_token(request)
             if not owner_profile:
-                return JsonResponse({'error': 'place_id or valid place API key is required'}, status=400)
+                return JsonResponse({'error': 'place_id or valid OAuth bearer token is required'}, status=400)
 
             place_id = owner_profile.place_id
 
@@ -270,7 +273,7 @@ def owner_account(request):
         return JsonResponse({'error': 'owner profile is required'}, status=403)
 
     if request.method == 'POST':
-        profile.rotate_api_key()
+        profile.rotate_client_credentials()
         return redirect('maps:owner-account')
 
     if request.method != 'GET':
@@ -295,11 +298,55 @@ def swagger_docs(request):
     return render(request, 'maps/swagger.html')
 
 
+@csrf_exempt
+def oauth_token(request):
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    payload, error = read_request_payload(request)
+    if error:
+        return JsonResponse({'error': error}, status=400)
+
+    grant_type = str(payload.get('grant_type', 'client_credentials')).strip()
+    if grant_type != 'client_credentials':
+        return JsonResponse({'error': 'unsupported_grant_type'}, status=400)
+
+    client_id, client_secret = get_client_credentials(request, payload)
+    if not client_id or not client_secret:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+
+    try:
+        profile = OwnerProfile.objects.get(client_id=client_id, client_secret=client_secret)
+    except OwnerProfile.DoesNotExist:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+
+    OwnerAccessToken.objects.filter(owner=profile, expires_at__lte=timezone.now()).delete()
+    token = OwnerAccessToken.objects.create(owner=profile)
+    expires_in = max(0, int((token.expires_at - timezone.now()).total_seconds()))
+
+    return JsonResponse({
+        'access_token': token.token,
+        'token_type': 'Bearer',
+        'expires_in': expires_in,
+        'scope': 'owner:reviews',
+        'place_id': profile.place_id,
+        'place_name': profile.place_name,
+    })
+
+
 def read_json_body(request):
     try:
         return json.loads(request.body.decode('utf-8') or '{}'), None
     except json.JSONDecodeError:
         return None, 'invalid JSON body'
+
+
+def read_request_payload(request):
+    content_type = request.headers.get('Content-Type', '')
+    if content_type.startswith('application/json'):
+        return read_json_body(request)
+
+    return request.POST.dict(), None
 
 
 def validate_review_payload(payload):
@@ -377,21 +424,51 @@ def get_reply_owner(request, place_id):
     if profile and profile.place_id == place_id:
         return profile
 
-    profile = get_owner_profile_by_api_key(request)
+    profile = get_owner_profile_by_access_token(request)
     if profile and profile.place_id == place_id:
         return profile
 
     return None
 
 
-def get_owner_profile_by_api_key(request):
-    provided_key = request.headers.get('X-API-Key', '')
-    if not provided_key:
+def get_client_credentials(request, payload):
+    authorization = request.headers.get('Authorization', '')
+    if authorization.startswith('Basic '):
+        encoded = authorization.removeprefix('Basic ').strip()
+        try:
+            decoded = base64.b64decode(encoded).decode('utf-8')
+        except (binascii.Error, UnicodeDecodeError):
+            return '', ''
+
+        client_id, separator, client_secret = decoded.partition(':')
+        if separator:
+            return client_id, client_secret
+
+    return (
+        str(payload.get('client_id', '')).strip(),
+        str(payload.get('client_secret', '')).strip(),
+    )
+
+
+def get_owner_profile_by_access_token(request):
+    authorization = request.headers.get('Authorization', '')
+    if not authorization.startswith('Bearer '):
         return None
+
+    token_value = authorization.removeprefix('Bearer ').strip()
+    if not token_value:
+        return None
+
     try:
-        return OwnerProfile.objects.get(api_key=provided_key)
-    except OwnerProfile.DoesNotExist:
+        token = OwnerAccessToken.objects.select_related('owner', 'owner__user').get(token=token_value)
+    except OwnerAccessToken.DoesNotExist:
         return None
+
+    if token.is_expired:
+        token.delete()
+        return None
+
+    return token.owner
 
 
 def serialize_review(review):
@@ -428,11 +505,16 @@ def build_openapi_schema():
         'servers': [{'url': '/'}],
         'components': {
             'securitySchemes': {
-                'ApiKeyAuth': {
-                    'type': 'apiKey',
-                    'in': 'header',
-                    'name': 'X-API-Key',
-                    'description': '점주 계정별로 생성된 가게 API 키입니다. 해당 키의 가게 리뷰에만 답글을 달 수 있습니다.',
+                'OAuthClientCredentials': {
+                    'type': 'oauth2',
+                    'flows': {
+                        'clientCredentials': {
+                            'tokenUrl': '/oauth/token/',
+                            'scopes': {
+                                'owner:reviews': '점주 가게 리뷰 조회와 답글 관리',
+                            },
+                        },
+                    },
                 },
                 'OwnerSession': {
                     'type': 'apiKey',
@@ -493,14 +575,59 @@ def build_openapi_schema():
                         'content': {'type': 'string', 'maxLength': 2000},
                     },
                 },
+                'OAuthTokenRequest': {
+                    'type': 'object',
+                    'required': ['grant_type', 'client_id', 'client_secret'],
+                    'properties': {
+                        'grant_type': {'type': 'string', 'enum': ['client_credentials']},
+                        'client_id': {'type': 'string'},
+                        'client_secret': {'type': 'string'},
+                    },
+                },
+                'OAuthTokenResponse': {
+                    'type': 'object',
+                    'properties': {
+                        'access_token': {'type': 'string'},
+                        'token_type': {'type': 'string', 'example': 'Bearer'},
+                        'expires_in': {'type': 'integer'},
+                        'scope': {'type': 'string'},
+                        'place_id': {'type': 'string'},
+                        'place_name': {'type': 'string'},
+                    },
+                },
             },
         },
         'paths': {
+            '/oauth/token/': {
+                'post': {
+                    'summary': 'OAuth access token 발급',
+                    'description': '점주 Client ID와 Client Secret으로 client_credentials 토큰을 발급합니다.',
+                    'requestBody': {
+                        'required': True,
+                        'content': {
+                            'application/json': {
+                                'schema': {'$ref': '#/components/schemas/OAuthTokenRequest'},
+                            },
+                            'application/x-www-form-urlencoded': {
+                                'schema': {'$ref': '#/components/schemas/OAuthTokenRequest'},
+                            },
+                        },
+                    },
+                    'responses': {
+                        '200': {
+                            'description': '발급된 bearer token',
+                            'content': {'application/json': {'schema': {'$ref': '#/components/schemas/OAuthTokenResponse'}}},
+                        },
+                        '400': {'description': '지원하지 않는 grant_type 또는 잘못된 요청'},
+                        '401': {'description': 'client_id 또는 client_secret 불일치'},
+                    },
+                },
+            },
             '/api/reviews/': {
                 'get': {
                     'summary': '장소 리뷰 목록 조회',
-                    'description': 'place_id 쿼리로 공개 조회하거나, X-API-Key만 보내 점주 가게 리뷰를 조회합니다.',
-                    'security': [{}, {'ApiKeyAuth': []}],
+                    'description': 'place_id 쿼리로 공개 조회하거나, bearer token만 보내 점주 가게 리뷰를 조회합니다.',
+                    'security': [{}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'place_id',
                         'in': 'query',
@@ -559,7 +686,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/': {
                 'post': {
                     'summary': '점주 답글 작성',
-                    'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
+                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [{
                         'name': 'review_id',
                         'in': 'path',
@@ -576,7 +703,7 @@ def build_openapi_schema():
                     },
                     'responses': {
                         '200': {'description': '답글이 포함된 리뷰'},
-                        '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
+                        '401': {'description': '점주 로그인 또는 해당 가게 bearer token 필요'},
                         '403': {'description': '이 점주 계정은 해당 가게에 답글을 달 수 없음'},
                     },
                 },
@@ -584,7 +711,7 @@ def build_openapi_schema():
             '/api/reviews/{review_id}/reply/{reply_id}/': {
                 'patch': {
                     'summary': '점주 답글 수정',
-                    'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
+                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',
@@ -610,14 +737,14 @@ def build_openapi_schema():
                     'responses': {
                         '200': {'description': '수정된 답글이 포함된 리뷰'},
                         '400': {'description': '검증 실패'},
-                        '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
+                        '401': {'description': '점주 로그인 또는 해당 가게 bearer token 필요'},
                         '403': {'description': '이 점주 계정은 해당 가게 답글을 수정할 수 없음'},
                         '404': {'description': '리뷰 또는 답글 없음'},
                     },
                 },
                 'delete': {
                     'summary': '점주 답글 삭제',
-                    'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
+                    'security': [{'OwnerSession': []}, {'OAuthClientCredentials': ['owner:reviews']}],
                     'parameters': [
                         {
                             'name': 'review_id',
@@ -634,7 +761,7 @@ def build_openapi_schema():
                     ],
                     'responses': {
                         '200': {'description': '답글이 삭제된 리뷰'},
-                        '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
+                        '401': {'description': '점주 로그인 또는 해당 가게 bearer token 필요'},
                         '403': {'description': '이 점주 계정은 해당 가게 답글을 삭제할 수 없음'},
                         '404': {'description': '리뷰 또는 답글 없음'},
                     },

@@ -1,13 +1,31 @@
 import secrets
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.utils import timezone
+
+
+def generate_owner_client_id():
+    return f'oci_{secrets.token_urlsafe(18)}'
+
+
+def generate_owner_client_secret():
+    return f'ocs_{secrets.token_urlsafe(32)}'
 
 
 def generate_owner_api_key():
-    return f'okr_{secrets.token_urlsafe(32)}'
+    return generate_owner_client_secret()
+
+
+def generate_owner_access_token():
+    return f'oat_{secrets.token_urlsafe(40)}'
+
+
+def default_token_expires_at():
+    return timezone.now() + timedelta(hours=1)
 
 
 class OwnerProfile(models.Model):
@@ -19,7 +37,8 @@ class OwnerProfile(models.Model):
     place_id = models.CharField(max_length=255, unique=True)
     place_name = models.CharField(max_length=255)
     place_address = models.CharField(max_length=500, blank=True)
-    api_key = models.CharField(max_length=128, unique=True, default=generate_owner_api_key)
+    client_id = models.CharField(max_length=128, unique=True, default=generate_owner_client_id)
+    client_secret = models.CharField(max_length=128, unique=True, default=generate_owner_client_secret)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -29,10 +48,37 @@ class OwnerProfile(models.Model):
     def __str__(self):
         return f'{self.place_name} - {self.user.get_username()}'
 
-    def rotate_api_key(self):
-        self.api_key = generate_owner_api_key()
-        self.save(update_fields=['api_key', 'updated_at'])
-        return self.api_key
+    def rotate_client_credentials(self):
+        self.client_id = generate_owner_client_id()
+        self.client_secret = generate_owner_client_secret()
+        self.oauth_tokens.all().delete()
+        self.save(update_fields=['client_id', 'client_secret', 'updated_at'])
+        return self.client_id, self.client_secret
+
+
+class OwnerAccessToken(models.Model):
+    owner = models.ForeignKey(
+        OwnerProfile,
+        on_delete=models.CASCADE,
+        related_name='oauth_tokens',
+    )
+    token = models.CharField(max_length=160, unique=True, default=generate_owner_access_token)
+    expires_at = models.DateTimeField(default=default_token_expires_at)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['token']),
+            models.Index(fields=['expires_at']),
+        ]
+
+    def __str__(self):
+        return f'OAuth token for {self.owner}'
+
+    @property
+    def is_expired(self):
+        return self.expires_at <= timezone.now()
 
 
 class Review(models.Model):

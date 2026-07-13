@@ -12,6 +12,7 @@ urlpatterns = [
     path('owner/logout/', views.owner_logout, name='owner-logout'),
     path('owner/signup/', views.owner_signup, name='owner-signup'),
     path('owner/account/', views.owner_account, name='owner-account'),
+    path('oauth/token/', views.oauth_token, name='oauth-token'),
     path('api/reviews/', views.review_collection, name='review-collection'),
     path('api/reviews/<int:review_id>/', views.review_detail, name='review-detail'),
     path('api/reviews/<int:review_id>/reply/', views.review_reply, name='review-reply'),

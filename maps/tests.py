@@ -3,7 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from .models import OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerProfile, Review, ReviewReply
 
 
 class MapPageTests(TestCase):
@@ -50,6 +50,19 @@ class MapPageTests(TestCase):
 
 
 class ReviewApiTests(TestCase):
+    def issue_owner_token(self, profile):
+        response = self.client.post(
+            '/oauth/token/',
+            data=json.dumps({
+                'grant_type': 'client_credentials',
+                'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()['access_token']
+
     def test_create_and_list_reviews(self):
         create_response = self.client.post(
             '/api/reviews/',
@@ -72,7 +85,7 @@ class ReviewApiTests(TestCase):
         self.assertEqual(len(list_response.json()['data']), 1)
         self.assertEqual(list_response.json()['data'][0]['rating'], 5)
 
-    def test_list_reviews_with_place_api_key_without_place_id(self):
+    def test_list_reviews_with_bearer_token_without_place_id(self):
         Review.objects.create(
             place_id='place-1',
             place_name='테스트 카페',
@@ -92,10 +105,12 @@ class ReviewApiTests(TestCase):
             user=owner,
             place_id='place-1',
             place_name='테스트 카페',
-            api_key='owner-place-key',
+            client_id='owner-client',
+            client_secret='owner-secret',
         )
+        token = self.issue_owner_token(profile)
 
-        response = self.client.get('/api/reviews/', HTTP_X_API_KEY=profile.api_key)
+        response = self.client.get('/api/reviews/', HTTP_AUTHORIZATION=f'Bearer {token}')
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['place_id'], 'place-1')
@@ -149,7 +164,7 @@ class ReviewApiTests(TestCase):
         self.assertEqual(delete_response.status_code, 403)
         self.assertTrue(Review.objects.filter(pk=review_id).exists())
 
-    def test_owner_reply_requires_staff_or_api_key(self):
+    def test_owner_reply_requires_staff_or_bearer_token(self):
         review = Review.objects.create(
             place_id='place-1',
             place_name='테스트 카페',
@@ -232,7 +247,7 @@ class ReviewApiTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
-    def test_place_api_key_can_reply_to_own_place(self):
+    def test_bearer_token_can_reply_to_own_place(self):
         review = Review.objects.create(
             place_id='place-1',
             place_name='테스트 카페',
@@ -245,14 +260,16 @@ class ReviewApiTests(TestCase):
             user=owner,
             place_id='place-1',
             place_name='테스트 카페',
-            api_key='owner-place-key',
+            client_id='owner-client',
+            client_secret='owner-secret',
         )
+        token = self.issue_owner_token(profile)
 
         response = self.client.post(
             f'/api/reviews/{review.id}/reply/',
             data=json.dumps({'content': '확인했습니다.'}),
             content_type='application/json',
-            HTTP_X_API_KEY=profile.api_key,
+            HTTP_AUTHORIZATION=f'Bearer {token}',
         )
 
         self.assertEqual(response.status_code, 200)
@@ -285,7 +302,7 @@ class ReviewApiTests(TestCase):
         self.assertEqual(delete_response.status_code, 200)
         self.assertEqual(delete_response.json()['data']['replies'], [])
 
-    def test_place_api_key_can_update_own_reply(self):
+    def test_bearer_token_can_update_own_reply(self):
         review = Review.objects.create(
             place_id='place-1',
             place_name='테스트 카페',
@@ -298,19 +315,21 @@ class ReviewApiTests(TestCase):
             user=owner,
             place_id='place-1',
             place_name='테스트 카페',
-            api_key='owner-place-key',
+            client_id='owner-client',
+            client_secret='owner-secret',
         )
         reply = ReviewReply.objects.create(
             review=review,
             owner=owner,
             content='수정 전 답글입니다.',
         )
+        token = self.issue_owner_token(profile)
 
         response = self.client.patch(
             f'/api/reviews/{review.id}/reply/{reply.id}/',
             data=json.dumps({'content': '수정된 답글입니다.'}),
             content_type='application/json',
-            HTTP_X_API_KEY=profile.api_key,
+            HTTP_AUTHORIZATION=f'Bearer {token}',
         )
 
         self.assertEqual(response.status_code, 200)
@@ -318,7 +337,7 @@ class ReviewApiTests(TestCase):
         reply.refresh_from_db()
         self.assertEqual(reply.content, '수정된 답글입니다.')
 
-    def test_place_api_key_cannot_reply_to_other_place(self):
+    def test_bearer_token_cannot_reply_to_other_place(self):
         review = Review.objects.create(
             place_id='place-1',
             place_name='테스트 카페',
@@ -331,19 +350,21 @@ class ReviewApiTests(TestCase):
             user=owner,
             place_id='place-2',
             place_name='다른 가게',
-            api_key='owner-place-key',
+            client_id='owner-client',
+            client_secret='owner-secret',
         )
+        token = self.issue_owner_token(profile)
 
         response = self.client.post(
             f'/api/reviews/{review.id}/reply/',
             data=json.dumps({'content': '확인했습니다.'}),
             content_type='application/json',
-            HTTP_X_API_KEY=profile.api_key,
+            HTTP_AUTHORIZATION=f'Bearer {token}',
         )
 
         self.assertEqual(response.status_code, 401)
 
-    def test_owner_signup_creates_profile_and_api_key(self):
+    def test_owner_signup_creates_profile_and_oauth_credentials(self):
         response = self.client.post(
             '/owner/signup/',
             data={
@@ -358,7 +379,8 @@ class ReviewApiTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         profile = OwnerProfile.objects.get(place_id='place-1')
-        self.assertTrue(profile.api_key.startswith('okr_'))
+        self.assertTrue(profile.client_id.startswith('oci_'))
+        self.assertTrue(profile.client_secret.startswith('ocs_'))
 
     def test_owner_signup_accepts_place_id_only(self):
         response = self.client.post(
@@ -406,24 +428,75 @@ class ReviewApiTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.headers['Location'], '/owner/account/')
 
-    def test_owner_account_hides_api_key_until_revealed(self):
+    def test_owner_account_hides_client_secret_until_revealed(self):
         owner = get_user_model().objects.create_user(username='owner-hidden-key', password='password123')
         profile = OwnerProfile.objects.create(
             user=owner,
             place_id='place-1',
             place_name='테스트 카페',
-            api_key='owner-hidden-api-key',
+            client_id='owner-client',
+            client_secret='owner-hidden-client-secret',
         )
         self.client.force_login(owner)
 
         response = self.client.get('/owner/account/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-api-key="owner-hidden-api-key"')
+        self.assertContains(response, 'owner-client')
+        self.assertContains(response, 'data-copy-value="owner-hidden-client-secret"')
         self.assertContains(response, '••••')
         self.assertContains(response, '보이기')
         self.assertContains(response, '복사')
-        self.assertEqual(profile.api_key, 'owner-hidden-api-key')
+        self.assertEqual(profile.client_secret, 'owner-hidden-client-secret')
+
+    def test_oauth_token_issues_bearer_token_for_client_credentials(self):
+        owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
+        profile = OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            client_id='owner-client',
+            client_secret='owner-secret',
+        )
+
+        response = self.client.post(
+            '/oauth/token/',
+            data=json.dumps({
+                'grant_type': 'client_credentials',
+                'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['token_type'], 'Bearer')
+        self.assertEqual(payload['scope'], 'owner:reviews')
+        self.assertEqual(payload['place_id'], 'place-1')
+        self.assertTrue(OwnerAccessToken.objects.filter(token=payload['access_token']).exists())
+
+    def test_oauth_token_rejects_invalid_client_secret(self):
+        owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
+        OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            client_id='owner-client',
+            client_secret='owner-secret',
+        )
+
+        response = self.client.post(
+            '/oauth/token/',
+            data=json.dumps({
+                'grant_type': 'client_credentials',
+                'client_id': 'owner-client',
+                'client_secret': 'wrong-secret',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 401)
 
     def test_owner_logout(self):
         owner = get_user_model().objects.create_user(username='owner-logout', password='password123')

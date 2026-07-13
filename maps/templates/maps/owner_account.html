@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>점주 API 키</title>
+    <title>점주 OAuth 설정</title>
     <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
 </head>
 <body class="owner-page">
@@ -33,41 +33,53 @@
                     <dd>{{ profile.place_id }}</dd>
                 </div>
                 <div>
-                    <dt>API 키</dt>
+                    <dt>Client ID</dt>
                     <dd>
                         <div class="api-key-box">
-                            <code id="ownerApiKey" data-api-key="{{ profile.api_key }}">••••••••••••••••••••••••••••</code>
-                            <button id="toggleApiKey" type="button" aria-controls="ownerApiKey" aria-pressed="false">보이기</button>
-                            <button id="copyApiKey" type="button">복사</button>
+                            <code id="ownerClientId" data-copy-value="{{ profile.client_id }}">{{ profile.client_id }}</code>
+                            <button class="copy-credential" type="button" data-copy-target="ownerClientId">복사</button>
+                        </div>
+                    </dd>
+                </div>
+                <div>
+                    <dt>Client Secret</dt>
+                    <dd>
+                        <div class="api-key-box">
+                            <code id="ownerClientSecret" data-copy-value="{{ profile.client_secret }}">••••••••••••••••••••••••••••</code>
+                            <button id="toggleClientSecret" type="button" aria-controls="ownerClientSecret" aria-pressed="false">보이기</button>
+                            <button class="copy-credential" type="button" data-copy-target="ownerClientSecret">복사</button>
                         </div>
                     </dd>
                 </div>
             </dl>
             <form class="owner-key-form" method="post">
                 {% csrf_token %}
-                <button class="owner-danger" type="submit">API 키 재발급</button>
+                <button class="owner-danger" type="submit">OAuth 자격증명 재발급</button>
             </form>
         </section>
     </main>
     <script>
-        const keyValue = document.querySelector('#ownerApiKey');
-        const toggleButton = document.querySelector('#toggleApiKey');
-        const copyButton = document.querySelector('#copyApiKey');
+        const secretValue = document.querySelector('#ownerClientSecret');
+        const toggleButton = document.querySelector('#toggleClientSecret');
+        const copyButtons = document.querySelectorAll('.copy-credential');
         const masked = '••••••••••••••••••••••••••••';
 
         toggleButton.addEventListener('click', () => {
             const isVisible = toggleButton.getAttribute('aria-pressed') === 'true';
-            keyValue.textContent = isVisible ? masked : keyValue.dataset.apiKey;
+            secretValue.textContent = isVisible ? masked : secretValue.dataset.copyValue;
             toggleButton.textContent = isVisible ? '보이기' : '숨기기';
             toggleButton.setAttribute('aria-pressed', String(!isVisible));
         });
 
-        copyButton.addEventListener('click', async () => {
-            await navigator.clipboard.writeText(keyValue.dataset.apiKey);
-            copyButton.textContent = '복사됨';
-            window.setTimeout(() => {
-                copyButton.textContent = '복사';
-            }, 1400);
+        copyButtons.forEach((button) => {
+            button.addEventListener('click', async () => {
+                const target = document.querySelector(`#${button.dataset.copyTarget}`);
+                await navigator.clipboard.writeText(target.dataset.copyValue);
+                button.textContent = '복사됨';
+                window.setTimeout(() => {
+                    button.textContent = '복사';
+                }, 1400);
+            });
         });
     </script>
 </body>
