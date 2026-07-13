@@ -1,0 +1,73 @@
+{% load static %}
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GoogleMap-Mock</title>
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIINfQnnG7HqUvvRjuA/r9bSqKrwVJSq6ic="
+        crossorigin=""
+    >
+    <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
+</head>
+<body>
+    <main class="map-shell">
+        <div class="topbar" aria-label="지도 검색">
+            <div class="brand-mark" aria-hidden="true">
+                <span class="brand-blue"></span>
+                <span class="brand-red"></span>
+                <span class="brand-yellow"></span>
+                <span class="brand-green"></span>
+            </div>
+            <label class="search-box">
+                <span class="visually-hidden">장소 검색</span>
+                <input id="placeSearch" type="search" placeholder="GoogleMap-Mock 검색" autocomplete="off">
+            </label>
+            <button id="clearSearch" class="icon-button" type="button" aria-label="검색 초기화">
+                <span aria-hidden="true">×</span>
+            </button>
+        </div>
+
+        <aside id="placePanel" class="place-panel" aria-label="장소 상세 정보" aria-hidden="true">
+            <button id="closePanel" class="panel-close" type="button" aria-label="상세 정보 닫기">
+                <span aria-hidden="true">×</span>
+            </button>
+            <div class="place-photo" id="placePhoto"></div>
+            <div class="place-content">
+                <p class="place-category" id="placeCategory"></p>
+                <h1 id="placeName"></h1>
+                <div class="rating-row">
+                    <strong id="placeRating"></strong>
+                    <span id="placeStars" aria-hidden="true"></span>
+                    <span id="placeReviews"></span>
+                </div>
+                <p class="place-address" id="placeAddress"></p>
+                <p class="place-description" id="placeDescription"></p>
+                <dl class="place-meta">
+                    <div>
+                        <dt>운영</dt>
+                        <dd id="placeHours"></dd>
+                    </div>
+                    <div>
+                        <dt>추천</dt>
+                        <dd id="placeTip"></dd>
+                    </div>
+                </dl>
+            </div>
+        </aside>
+
+        <section id="resultsPanel" class="results-panel" aria-label="검색 결과"></section>
+        <div id="map" aria-label="서울 지도"></div>
+    </main>
+
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script src="{% static 'maps/app.js' %}"></script>
+</body>
+</html>

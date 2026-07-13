@@ -1,16 +1,10 @@
 from django.http import JsonResponse
+from django.shortcuts import render
 
 
 def index(request):
-    return JsonResponse(
-        {
-            'service': 'GoogleMap-Mock',
-            'message': 'Django project is running.',
-        }
-    )
+    return render(request, 'maps/index.html')
 
 
 def health(request):
     return JsonResponse({'status': 'ok'})
-
-# Create your views here.
