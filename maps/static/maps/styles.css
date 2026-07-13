@@ -126,7 +126,7 @@ input {
 
 .place-panel {
     position: absolute;
-    top: 88px;
+    top: 16px;
     right: 16px;
     z-index: 510;
     width: min(384px, calc(100vw - 32px));
@@ -155,15 +155,8 @@ input {
     background: rgba(255, 255, 255, 0.92);
 }
 
-.place-photo {
-    width: 100%;
-    aspect-ratio: 16 / 9;
-    background-position: center;
-    background-size: cover;
-}
-
 .place-content {
-    padding: 18px 20px 22px;
+    padding: 24px 20px 22px;
 }
 
 .place-category {
@@ -253,6 +246,21 @@ input {
 
 .results-panel.is-open {
     display: block;
+}
+
+.map-notice {
+    position: absolute;
+    right: 16px;
+    bottom: 24px;
+    z-index: 520;
+    max-width: min(360px, calc(100vw - 32px));
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(31, 41, 51, 0.84);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: var(--shadow);
 }
 
 .result-button {
