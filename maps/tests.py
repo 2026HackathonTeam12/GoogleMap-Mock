@@ -6,7 +6,7 @@ class MapPageTests(TestCase):
         response = self.client.get('/')
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'GoogleMap-Mock')
+        self.assertContains(response, '서울 장소 지도')
         self.assertContains(response, 'id="map"')
         self.assertContains(response, 'maps/app.js')
         self.assertContains(response, 'unpkg.com/leaflet')

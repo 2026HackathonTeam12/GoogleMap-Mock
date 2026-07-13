@@ -147,13 +147,12 @@ function normalizeGooglePlace(place) {
         : '리뷰 정보 없음';
     const primaryType = formatPlaceType(place.types?.[0]);
     const openNow = place.opening_hours?.isOpen?.();
-    const hours = place.opening_hours?.weekday_text?.join(' / ')
-        || (typeof openNow === 'boolean' ? (openNow ? '영업 중' : '영업 종료') : '운영 정보 없음');
-    const contact = [
-        place.formatted_phone_number,
-        place.website ? `<a href="${place.website}" target="_blank" rel="noreferrer">웹사이트</a>` : '',
-        place.url ? `<a href="${place.url}" target="_blank" rel="noreferrer">Google Maps</a>` : '',
-    ].filter(Boolean).join(' · ') || '연락처 정보 없음';
+    const hours = formatOpeningHours(place.opening_hours?.weekday_text, openNow);
+    const contact = place.formatted_phone_number || '연락처 정보 없음';
+    const actions = [
+        place.url ? { label: '지도에서 보기', url: place.url } : null,
+        place.website ? { label: '공식 사이트', url: place.website } : null,
+    ].filter(Boolean);
 
     return {
         name: place.name || '이름 없는 장소',
@@ -161,9 +160,10 @@ function normalizeGooglePlace(place) {
         rating,
         reviewText,
         address: place.formatted_address || '주소 정보 없음',
-        description: place.business_status ? `상태: ${formatBusinessStatus(place.business_status)}` : 'Google Maps 장소 정보입니다.',
+        description: place.business_status ? `상태: ${formatBusinessStatus(place.business_status)}` : '상세 정보가 준비되어 있습니다.',
         hours,
         contact,
+        actions,
     };
 }
 
@@ -175,8 +175,11 @@ function renderPlaceDetails(place) {
     document.querySelector('#placeReviews').textContent = place.reviewText;
     document.querySelector('#placeAddress').textContent = place.address;
     document.querySelector('#placeDescription').textContent = place.description;
-    document.querySelector('#placeHours').textContent = place.hours;
-    document.querySelector('#placeTip').innerHTML = place.contact;
+    document.querySelector('#placeHours').innerHTML = place.hours;
+    document.querySelector('#placeTip').textContent = place.contact;
+    document.querySelector('#placeActions').innerHTML = place.actions.map((action) => (
+        `<a class="action-link" href="${escapeHtml(action.url)}" target="_blank" rel="noreferrer" aria-label="${escapeHtml(action.label)} 새 창 열기">${escapeHtml(action.label)}</a>`
+    )).join('');
 
     panel.classList.add('is-open');
     panel.setAttribute('aria-hidden', 'false');
@@ -201,6 +204,30 @@ function renderMessage(message) {
 function buildStars(rating) {
     const rounded = Math.round(rating);
     return '★★★★★'.slice(0, rounded) + '☆☆☆☆☆'.slice(0, 5 - rounded);
+}
+
+function formatOpeningHours(weekdayText, openNow) {
+    if (!weekdayText?.length) {
+        if (typeof openNow === 'boolean') {
+            return `<p class="hours-fallback">${openNow ? '현재 영업 중' : '현재 영업 종료'}</p>`;
+        }
+
+        return '<p class="hours-fallback">운영 정보 없음</p>';
+    }
+
+    const todayIndex = new Date().getDay();
+    const googleTodayIndex = todayIndex === 0 ? 6 : todayIndex - 1;
+
+    return `<ul class="hours-list">${weekdayText.map((line, index) => {
+        const [day, ...timeParts] = line.split(': ');
+        const time = timeParts.join(': ') || '시간 정보 없음';
+        const todayClass = index === googleTodayIndex ? ' class="is-today"' : '';
+
+        return `<li${todayClass}>
+            <span class="hours-day">${escapeHtml(day)}</span>
+            <span class="hours-time">${escapeHtml(time)}</span>
+        </li>`;
+    }).join('')}</ul>`;
 }
 
 function formatPlaceType(type) {
