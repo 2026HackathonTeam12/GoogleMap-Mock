@@ -12,12 +12,14 @@ from .models import OwnerProfile, Review, ReviewReply
 
 
 def index(request):
+    owner_profile = get_user_owner_profile(request.user)
     return render(
         request,
         'maps/index.html',
         {
             'google_maps_api_key': settings.GOOGLE_MAPS_API_KEY,
-            'is_owner': has_owner_profile(request.user),
+            'is_owner': bool(owner_profile),
+            'owner_place_id': owner_profile.place_id if owner_profile else '',
         },
     )
 
@@ -37,7 +39,7 @@ def review_collection(request):
 
             place_id = owner_profile.place_id
 
-        reviews = Review.objects.filter(place_id=place_id).select_related('reply__owner')
+        reviews = Review.objects.filter(place_id=place_id).prefetch_related('replies__owner')
         return JsonResponse({
             'data': [serialize_review(review) for review in reviews],
             'place_id': place_id,
@@ -115,15 +117,41 @@ def review_reply(request, review_id):
     if len(content) > 2000:
         return JsonResponse({'errors': {'content': 'content must be 2000 characters or fewer'}}, status=400)
 
-    reply, _ = ReviewReply.objects.update_or_create(
+    reply = ReviewReply.objects.create(
         review=review,
-        defaults={
-            'owner': owner_profile.user,
-            'content': content,
-        },
+        owner=owner_profile.user,
+        content=content,
     )
 
     return JsonResponse({'data': serialize_review(reply.review)})
+
+
+@csrf_exempt
+def review_reply_detail(request, review_id, reply_id):
+    if request.method != 'DELETE':
+        return HttpResponseNotAllowed(['DELETE'])
+
+    try:
+        review = Review.objects.get(pk=review_id)
+    except Review.DoesNotExist:
+        return JsonResponse({'error': 'review not found'}, status=404)
+
+    owner_profile = get_reply_owner(request, review.place_id)
+    if not owner_profile:
+        if request.user.is_authenticated:
+            return JsonResponse({'error': 'this owner account cannot delete replies for this place'}, status=403)
+
+        return JsonResponse({'error': 'owner login or valid place API key is required'}, status=401)
+
+    deleted, _ = ReviewReply.objects.filter(
+        pk=reply_id,
+        review=review,
+        owner=owner_profile.user,
+    ).delete()
+    if not deleted:
+        return JsonResponse({'error': 'reply not found'}, status=404)
+
+    return JsonResponse({'data': serialize_review(review)})
 
 
 def owner_login(request):
@@ -336,10 +364,16 @@ def get_owner_profile_by_api_key(request):
 
 
 def serialize_review(review):
-    try:
-        reply = review.reply
-    except ReviewReply.DoesNotExist:
-        reply = None
+    replies = [
+        {
+            'id': reply.id,
+            'content': reply.content,
+            'owner_name': reply.owner.get_username() if reply.owner_id else 'owner',
+            'created_at': reply.created_at.isoformat(),
+            'updated_at': reply.updated_at.isoformat(),
+        }
+        for reply in review.replies.all()
+    ]
     return {
         'id': review.id,
         'place_id': review.place_id,
@@ -348,12 +382,7 @@ def serialize_review(review):
         'rating': review.rating,
         'content': review.content,
         'created_at': review.created_at.isoformat(),
-        'reply': {
-            'content': reply.content,
-            'owner_name': reply.owner.get_username() if reply.owner_id else 'owner',
-            'created_at': reply.created_at.isoformat(),
-            'updated_at': reply.updated_at.isoformat(),
-        } if reply else None,
+        'replies': replies,
     }
 
 
@@ -392,14 +421,17 @@ def build_openapi_schema():
                         'rating': {'type': 'integer', 'minimum': 1, 'maximum': 5},
                         'content': {'type': 'string'},
                         'created_at': {'type': 'string', 'format': 'date-time'},
-                        'reply': {
-                            'nullable': True,
-                            'type': 'object',
-                            'properties': {
-                                'content': {'type': 'string'},
-                                'owner_name': {'type': 'string'},
-                                'created_at': {'type': 'string', 'format': 'date-time'},
-                                'updated_at': {'type': 'string', 'format': 'date-time'},
+                        'replies': {
+                            'type': 'array',
+                            'items': {
+                                'type': 'object',
+                                'properties': {
+                                    'id': {'type': 'integer'},
+                                    'content': {'type': 'string'},
+                                    'owner_name': {'type': 'string'},
+                                    'created_at': {'type': 'string', 'format': 'date-time'},
+                                    'updated_at': {'type': 'string', 'format': 'date-time'},
+                                },
                             },
                         },
                     },
@@ -495,7 +527,7 @@ def build_openapi_schema():
             },
             '/api/reviews/{review_id}/reply/': {
                 'post': {
-                    'summary': '점주 답글 작성 또는 수정',
+                    'summary': '점주 답글 작성',
                     'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
                     'parameters': [{
                         'name': 'review_id',
@@ -515,6 +547,32 @@ def build_openapi_schema():
                         '200': {'description': '답글이 포함된 리뷰'},
                         '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
                         '403': {'description': '이 점주 계정은 해당 가게에 답글을 달 수 없음'},
+                    },
+                },
+            },
+            '/api/reviews/{review_id}/reply/{reply_id}/': {
+                'delete': {
+                    'summary': '점주 답글 삭제',
+                    'security': [{'OwnerSession': []}, {'ApiKeyAuth': []}],
+                    'parameters': [
+                        {
+                            'name': 'review_id',
+                            'in': 'path',
+                            'required': True,
+                            'schema': {'type': 'integer'},
+                        },
+                        {
+                            'name': 'reply_id',
+                            'in': 'path',
+                            'required': True,
+                            'schema': {'type': 'integer'},
+                        },
+                    ],
+                    'responses': {
+                        '200': {'description': '답글이 삭제된 리뷰'},
+                        '401': {'description': '점주 로그인 또는 해당 가게 API 키 필요'},
+                        '403': {'description': '이 점주 계정은 해당 가게 답글을 삭제할 수 없음'},
+                        '404': {'description': '리뷰 또는 답글 없음'},
                     },
                 },
             },

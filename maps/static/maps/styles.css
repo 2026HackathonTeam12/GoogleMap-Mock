@@ -222,7 +222,7 @@ input {
     top: 16px;
     right: 16px;
     z-index: 510;
-    width: min(408px, calc(100vw - 32px));
+    width: min(468px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
     overflow: auto;
     border: 1px solid rgba(255, 255, 255, 0.76);
@@ -576,6 +576,11 @@ input {
     line-height: 1.5;
 }
 
+.owner-replies {
+    display: grid;
+    gap: 8px;
+}
+
 .owner-reply {
     display: grid;
     gap: 6px;
@@ -584,36 +589,43 @@ input {
     background: var(--surface-soft);
 }
 
+.owner-reply-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .owner-reply strong {
     color: var(--text);
     font-size: 13px;
     font-weight: 800;
 }
 
-.delete-review-form,
+.delete-reply-button {
+    min-height: 28px;
+    padding: 4px 8px;
+    border: 1px solid #f0c8c4;
+    border-radius: var(--radius);
+    color: #9b1c16;
+    background: #fff;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
 .reply-form {
     padding-top: 2px;
 }
 
-.delete-review-form {
-    display: grid;
-    grid-template-columns: 1fr 64px;
-    gap: 8px;
+.review-card-actions {
+    display: flex;
+    justify-content: flex-end;
 }
 
-.delete-review-form input {
-    min-width: 0;
-    min-height: 34px;
-    padding: 0 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    color: var(--text);
-    background: #fff;
-    font-size: 13px;
-}
-
-.delete-review-form button {
-    min-height: 34px;
+.delete-review-button {
+    min-height: 32px;
+    padding: 6px 10px;
     border: 1px solid #f0c8c4;
     border-radius: var(--radius);
     color: #9b1c16;
@@ -621,6 +633,83 @@ input {
     font-size: 13px;
     font-weight: 800;
     cursor: pointer;
+}
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(23, 33, 43, 0.34);
+}
+
+.modal-backdrop[hidden] {
+    display: none;
+}
+
+.delete-dialog {
+    display: grid;
+    gap: 13px;
+    width: min(360px, 100%);
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+
+.delete-dialog h2,
+.delete-dialog p {
+    margin: 0;
+}
+
+.delete-dialog h2 {
+    color: var(--text);
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.delete-dialog p {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.delete-dialog input {
+    min-height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 14px;
+}
+
+.dialog-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.dialog-actions button {
+    min-height: 38px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.dialog-actions button:first-child {
+    border: 1px solid var(--line);
+    color: var(--text);
+    background: #fff;
+}
+
+.danger-action {
+    border: 0;
+    color: #fff;
+    background: #b3261e;
 }
 
 .owner-page {
@@ -861,7 +950,7 @@ input {
 }
 
 .place-panel.is-open ~ .map-notice {
-    right: min(440px, calc(100vw - 408px + 16px));
+    right: min(500px, calc(100vw - 468px + 16px));
 }
 
 .result-button {

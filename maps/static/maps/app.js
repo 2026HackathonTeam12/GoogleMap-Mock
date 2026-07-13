@@ -18,6 +18,11 @@ const reviewContent = document.querySelector('#reviewContent');
 const reviewDeletePassword = document.querySelector('#reviewDeletePassword');
 const reviewMessage = document.querySelector('#reviewMessage');
 const reviewList = document.querySelector('#reviewList');
+const deleteReviewDialog = document.querySelector('#deleteReviewDialog');
+const deleteReviewForm = document.querySelector('#deleteReviewForm');
+const deleteReviewPassword = document.querySelector('#deleteReviewPassword');
+const cancelDeleteReview = document.querySelector('#cancelDeleteReview');
+let pendingDeleteReviewId = null;
 
 window.initGoogleMap = function initGoogleMap() {
     activeProvider = 'google';
@@ -235,6 +240,8 @@ function renderReviews(reviews) {
         return;
     }
 
+    const canReply = selectedPlace?.placeId && window.OWNER_PLACE_ID === selectedPlace.placeId;
+
     reviewList.innerHTML = reviews.map((review) => (
         `<article class="review-card" data-review-id="${review.id}">
             <div class="review-card-head">
@@ -242,32 +249,40 @@ function renderReviews(reviews) {
                 <span>${buildOwnStars(review.rating)}</span>
             </div>
             <p>${escapeHtml(review.content)}</p>
-            ${review.reply ? renderReply(review.reply) : ''}
+            ${renderReplies(review.id, review.replies || [], canReply)}
             ${renderDeleteForm(review.id)}
-            ${window.REVIEW_OWNER_ENABLED ? renderReplyForm(review.id, review.reply) : ''}
+            ${canReply ? renderReplyForm(review.id) : ''}
         </article>`
     )).join('');
 }
 
-function renderReply(reply) {
-    return `<div class="owner-reply">
-        <strong>점주 답글</strong>
-        <p>${escapeHtml(reply.content)}</p>
-    </div>`;
+function renderReplies(reviewId, replies, canManage) {
+    if (!replies.length) {
+        return '';
+    }
+
+    return `<div class="owner-replies">${replies.map((reply) => (
+        `<div class="owner-reply">
+            <div class="owner-reply-head">
+                <strong>점주 답글</strong>
+                ${canManage ? `<button class="delete-reply-button" type="button" data-review-id="${reviewId}" data-reply-id="${reply.id}">삭제</button>` : ''}
+            </div>
+            <p>${escapeHtml(reply.content)}</p>
+        </div>`
+    )).join('')}</div>`;
 }
 
-function renderReplyForm(reviewId, reply) {
+function renderReplyForm(reviewId) {
     return `<form class="reply-form" data-review-id="${reviewId}">
-        <textarea name="content" rows="2" maxlength="2000" required>${reply ? escapeHtml(reply.content) : ''}</textarea>
-        <button type="submit">${reply ? '수정' : '답글'}</button>
+        <textarea name="content" rows="2" maxlength="2000" required></textarea>
+        <button type="submit">답글</button>
     </form>`;
 }
 
 function renderDeleteForm(reviewId) {
-    return `<form class="delete-review-form" data-review-id="${reviewId}">
-        <input name="delete_password" type="password" minlength="4" placeholder="삭제 비밀번호" required>
-        <button type="submit">삭제</button>
-    </form>`;
+    return `<div class="review-card-actions">
+        <button class="delete-review-button" type="button" data-review-id="${reviewId}">삭제</button>
+    </div>`;
 }
 
 function buildOwnStars(rating) {
@@ -279,6 +294,18 @@ function showReviewMessage(message, isError = false) {
     reviewMessage.textContent = message;
     reviewMessage.hidden = false;
     reviewMessage.classList.toggle('is-error', isError);
+}
+
+function openDeleteDialog(reviewId) {
+    pendingDeleteReviewId = reviewId;
+    deleteReviewPassword.value = '';
+    deleteReviewDialog.hidden = false;
+    deleteReviewPassword.focus();
+}
+
+function closeDeleteDialog() {
+    pendingDeleteReviewId = null;
+    deleteReviewDialog.hidden = true;
 }
 
 function formatOpeningHours(weekdayText, openNow) {
@@ -427,27 +454,58 @@ function bindUiEvents() {
             });
     });
 
-    reviewList.addEventListener('submit', (event) => {
-        const deleteForm = event.target.closest('.delete-review-form');
-        if (deleteForm) {
-            event.preventDefault();
-            const reviewId = deleteForm.dataset.reviewId;
-            const deletePassword = deleteForm.elements.delete_password.value;
+    deleteReviewForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!pendingDeleteReviewId) {
+            return;
+        }
 
-            fetch(`/api/reviews/${reviewId}/`, {
+        fetch(`/api/reviews/${pendingDeleteReviewId}/`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ delete_password: deleteReviewPassword.value }),
+        })
+            .then((response) => response.json().then((payload) => ({ response, payload })))
+            .then(({ response, payload }) => {
+                if (!response.ok) {
+                    throw new Error(payload.error || '리뷰 삭제에 실패했습니다.');
+                }
+
+                closeDeleteDialog();
+                showReviewMessage('리뷰가 삭제되었습니다.');
+                loadReviews(selectedPlace.placeId);
+            })
+            .catch((error) => {
+                showReviewMessage(error.message, true);
+            });
+    });
+
+    cancelDeleteReview.addEventListener('click', closeDeleteDialog);
+
+    deleteReviewDialog.addEventListener('click', (event) => {
+        if (event.target === deleteReviewDialog) {
+            closeDeleteDialog();
+        }
+    });
+
+    reviewList.addEventListener('click', (event) => {
+        const deleteReplyButton = event.target.closest('.delete-reply-button');
+        if (deleteReplyButton) {
+            const reviewId = deleteReplyButton.dataset.reviewId;
+            const replyId = deleteReplyButton.dataset.replyId;
+
+            fetch(`/api/reviews/${reviewId}/reply/${replyId}/`, {
                 method: 'DELETE',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ delete_password: deletePassword }),
             })
                 .then((response) => response.json().then((payload) => ({ response, payload })))
                 .then(({ response, payload }) => {
                     if (!response.ok) {
-                        throw new Error(payload.error || '리뷰 삭제에 실패했습니다.');
+                        throw new Error(payload.error || '답글 삭제에 실패했습니다.');
                     }
 
-                    showReviewMessage('리뷰가 삭제되었습니다.');
+                    showReviewMessage('답글이 삭제되었습니다.');
                     loadReviews(selectedPlace.placeId);
                 })
                 .catch((error) => {
@@ -456,6 +514,14 @@ function bindUiEvents() {
             return;
         }
 
+        const deleteButton = event.target.closest('.delete-review-button');
+        if (deleteButton) {
+            openDeleteDialog(deleteButton.dataset.reviewId);
+            return;
+        }
+    });
+
+    reviewList.addEventListener('submit', (event) => {
         const form = event.target.closest('.reply-form');
         if (!form) {
             return;
@@ -526,6 +592,10 @@ function bindUiEvents() {
 
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
+            if (!deleteReviewDialog.hidden) {
+                closeDeleteDialog();
+                return;
+            }
             closePlacePanel();
             resultsPanel.classList.remove('is-open');
             searchInput.blur();

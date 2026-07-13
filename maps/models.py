@@ -64,10 +64,10 @@ class Review(models.Model):
 
 
 class ReviewReply(models.Model):
-    review = models.OneToOneField(
+    review = models.ForeignKey(
         Review,
         on_delete=models.CASCADE,
-        related_name='reply',
+        related_name='replies',
     )
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,

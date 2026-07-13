@@ -36,14 +36,17 @@
           "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
           "content": { "type": "string" },
           "created_at": { "type": "string", "format": "date-time" },
-          "reply": {
-            "nullable": true,
-            "type": "object",
-            "properties": {
-              "content": { "type": "string" },
-              "owner_name": { "type": "string" },
-              "created_at": { "type": "string", "format": "date-time" },
-              "updated_at": { "type": "string", "format": "date-time" }
+          "replies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "integer" },
+                "content": { "type": "string" },
+                "owner_name": { "type": "string" },
+                "created_at": { "type": "string", "format": "date-time" },
+                "updated_at": { "type": "string", "format": "date-time" }
+              }
             }
           }
         }
@@ -142,7 +145,7 @@
     },
     "/api/reviews/{review_id}/reply/": {
       "post": {
-        "summary": "점주 답글 작성 또는 수정",
+        "summary": "점주 답글 작성",
         "security": [
           { "OwnerSession": [] },
           { "ApiKeyAuth": [] }
@@ -168,6 +171,35 @@
           "401": { "description": "점주 로그인 또는 해당 가게 API 키 필요" },
           "403": { "description": "이 점주 계정은 해당 가게에 답글을 달 수 없음" },
           "404": { "description": "리뷰 없음" }
+        }
+      }
+    },
+    "/api/reviews/{review_id}/reply/{reply_id}/": {
+      "delete": {
+        "summary": "점주 답글 삭제",
+        "security": [
+          { "OwnerSession": [] },
+          { "ApiKeyAuth": [] }
+        ],
+        "parameters": [
+          {
+            "name": "review_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          },
+          {
+            "name": "reply_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "답글이 삭제된 리뷰" },
+          "401": { "description": "점주 로그인 또는 해당 가게 API 키 필요" },
+          "403": { "description": "이 점주 계정은 해당 가게 답글을 삭제할 수 없음" },
+          "404": { "description": "리뷰 또는 답글 없음" }
         }
       }
     },

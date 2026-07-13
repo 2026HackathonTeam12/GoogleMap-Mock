@@ -177,7 +177,16 @@ class ReviewApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['data']['reply']['content'], '방문해 주셔서 감사합니다.')
+        self.assertEqual(response.json()['data']['replies'][0]['content'], '방문해 주셔서 감사합니다.')
+
+        second_response = self.client.post(
+            f'/api/reviews/{review.id}/reply/',
+            data=json.dumps({'content': '또 방문해주세요.'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(len(second_response.json()['data']['replies']), 2)
 
     def test_owner_cannot_reply_to_other_place(self):
         review = Review.objects.create(
@@ -231,7 +240,34 @@ class ReviewApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()['data']['reply']['owner_name'], 'owner')
+        self.assertEqual(response.json()['data']['replies'][0]['owner_name'], 'owner')
+
+    def test_owner_can_delete_own_reply(self):
+        review = Review.objects.create(
+            place_id='place-1',
+            place_name='테스트 카페',
+            author_name='방문자',
+            rating=4,
+            content='다시 갈게요.',
+        )
+        owner = get_user_model().objects.create_user(username='owner', password='password')
+        OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+        )
+        self.client.force_login(owner)
+        create_response = self.client.post(
+            f'/api/reviews/{review.id}/reply/',
+            data=json.dumps({'content': '삭제할 답글입니다.'}),
+            content_type='application/json',
+        )
+        reply_id = create_response.json()['data']['replies'][0]['id']
+
+        delete_response = self.client.delete(f'/api/reviews/{review.id}/reply/{reply_id}/')
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json()['data']['replies'], [])
 
     def test_place_api_key_cannot_reply_to_other_place(self):
         review = Review.objects.create(

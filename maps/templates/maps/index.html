@@ -104,11 +104,23 @@
         <section id="resultsPanel" class="results-panel" aria-label="검색 결과" aria-live="polite"></section>
         <div id="mapNotice" class="map-notice" hidden></div>
         <div id="map" aria-label="지도"></div>
+        <div id="deleteReviewDialog" class="modal-backdrop" hidden>
+            <form id="deleteReviewForm" class="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="deleteReviewTitle">
+                <h2 id="deleteReviewTitle">리뷰 삭제</h2>
+                <p>작성할 때 입력한 삭제 비밀번호를 입력하세요.</p>
+                <input id="deleteReviewPassword" name="delete_password" type="password" minlength="4" autocomplete="current-password" required>
+                <div class="dialog-actions">
+                    <button id="cancelDeleteReview" type="button">취소</button>
+                    <button class="danger-action" type="submit">삭제</button>
+                </div>
+            </form>
+        </div>
     </main>
 
     <script>
         window.GOOGLE_MAPS_ENABLED = {{ google_maps_api_key|yesno:"true,false" }};
         window.REVIEW_OWNER_ENABLED = {{ is_owner|yesno:"true,false" }};
+        window.OWNER_PLACE_ID = "{{ owner_place_id|escapejs }}";
     </script>
     <script src="{% static 'maps/app.js' %}"></script>
     {% if google_maps_api_key %}
