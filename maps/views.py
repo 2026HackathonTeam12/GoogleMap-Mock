@@ -1,6 +1,7 @@
 import base64
 import binascii
 import json
+import secrets
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -14,7 +15,8 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, PlatformOAuthClient, Review, ReviewReply
+from . import oauth_platform
 
 
 def index(request):
@@ -40,7 +42,7 @@ def review_collection(request):
     if request.method == 'GET':
         place_id = request.GET.get('place_id', '').strip()
         if not place_id:
-            owner_profile = get_owner_profile_by_access_token(request)
+            owner_profile = get_owner_profile_by_access_token(request, required_scope='owner:reviews')
             if not owner_profile:
                 return JsonResponse({'error': 'place_id or valid OAuth bearer token is required'}, status=400)
 
@@ -112,7 +114,7 @@ def review_reply(request, review_id):
         if request.user.is_authenticated:
             return JsonResponse({'error': 'this owner account cannot reply to this place'}, status=403)
 
-        return JsonResponse({'error': 'owner login or valid place API key is required'}, status=401)
+        return JsonResponse({'error': 'owner login or valid OAuth bearer token is required'}, status=401)
 
     payload, error = read_json_body(request)
     if error:
@@ -146,7 +148,7 @@ def review_reply_detail(request, review_id, reply_id):
         if request.user.is_authenticated:
             return JsonResponse({'error': 'this owner account cannot delete replies for this place'}, status=403)
 
-        return JsonResponse({'error': 'owner login or valid place API key is required'}, status=401)
+        return JsonResponse({'error': 'owner login or valid OAuth bearer token is required'}, status=401)
 
     try:
         reply = ReviewReply.objects.get(
@@ -312,52 +314,7 @@ def oauth_authorize(request):
         'state': request.GET.get('state') or request.POST.get('state', ''),
         'scope': request.GET.get('scope') or request.POST.get('scope', 'owner:reviews'),
     }
-    profile, error = validate_authorize_request(request, params)
-    current_profile = get_user_owner_profile(request.user)
-    effective_profile = profile or current_profile
-    if error:
-        return render(request, 'maps/oauth_authorize.html', {
-            'params': params,
-            'errors': {'oauth': error},
-            'values': {},
-            'profile': None,
-        }, status=400)
-    if request.method == 'GET' and not effective_profile:
-        return render(request, 'maps/oauth_authorize.html', {
-            'params': params,
-            'errors': {},
-            'values': {},
-            'profile': None,
-        })
-
-    if request.method == 'GET' and current_profile and current_profile.pk == effective_profile.pk:
-        return redirect_with_authorization_code(effective_profile, params)
-
-    if request.method == 'GET':
-        return render(request, 'maps/oauth_authorize.html', {
-            'params': params,
-            'errors': {},
-            'values': {},
-            'profile': effective_profile,
-        })
-
-    if request.method != 'POST':
-        return HttpResponseNotAllowed(['GET', 'POST'])
-
-    username = request.POST.get('username', '').strip()
-    password = request.POST.get('password', '')
-    user = authenticate(request, username=username, password=password)
-    current_profile = get_user_owner_profile(user) if user else None
-    if not current_profile or (profile and current_profile.pk != profile.pk):
-        return render(request, 'maps/oauth_authorize.html', {
-            'params': params,
-            'errors': {'account': '이 OAuth client의 점주 계정으로 로그인해주세요.'},
-            'values': {'username': username},
-            'profile': effective_profile,
-        }, status=403)
-
-    login(request, user)
-    return redirect_with_authorization_code(current_profile, params)
+    return oauth_platform.handle_oauth_authorize(request, params, get_user_owner_profile)
 
 
 def oauth_callback(request):
@@ -384,15 +341,40 @@ def oauth_token(request):
     if not client_id:
         return JsonResponse({'error': 'invalid_client'}, status=401)
 
+    platform = PlatformOAuthClient.objects.filter(client_id=client_id, is_active=True).first()
+    if platform:
+        auth_error = oauth_platform.authenticate_platform_client(
+            request,
+            payload,
+            platform,
+            get_client_credentials,
+        )
+        if auth_error:
+            return auth_error
+        if grant_type == 'authorization_code':
+            return oauth_platform.issue_platform_token_from_authorization_code(platform, payload)
+        if grant_type == 'refresh_token':
+            return oauth_platform.issue_platform_token_from_refresh(platform, payload)
+        return JsonResponse({'error': 'unsupported_grant_type'}, status=400)
+
     try:
         profile = OwnerProfile.objects.get(client_id=client_id)
     except OwnerProfile.DoesNotExist:
         return JsonResponse({'error': 'invalid_client'}, status=401)
 
+    auth_error = oauth_platform.authenticate_owner_client(
+        request,
+        payload,
+        profile,
+        get_client_credentials,
+    )
+    if auth_error:
+        return auth_error
+
     if grant_type == 'authorization_code':
-        return issue_token_from_authorization_code(profile, payload)
+        return oauth_platform.issue_token_from_authorization_code(profile, payload)
     if grant_type == 'refresh_token':
-        return issue_token_from_refresh_token(profile, payload)
+        return oauth_platform.issue_token_from_refresh_token(profile, payload)
 
     return JsonResponse({'error': 'unsupported_grant_type'}, status=400)
 
@@ -410,7 +392,44 @@ def oauth_revoke(request):
     if not token_value:
         return JsonResponse({'error': 'token is required'}, status=400)
 
+    client_id = str(payload.get('client_id', '')).strip()
+    if not client_id:
+        client_id, _ = get_client_credentials(request, payload)
+    if not client_id:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+
+    platform = PlatformOAuthClient.objects.filter(client_id=client_id, is_active=True).first()
+    if platform:
+        auth_error = oauth_platform.authenticate_platform_client(
+            request,
+            payload,
+            platform,
+            get_client_credentials,
+        )
+        if auth_error:
+            return auth_error
+        OwnerAccessToken.objects.filter(
+            Q(token=token_value) | Q(refresh_token=token_value),
+        ).update(revoked_at=timezone.now())
+        return JsonResponse({'data': {'revoked': True}})
+
+    try:
+        profile = OwnerProfile.objects.get(client_id=client_id)
+    except OwnerProfile.DoesNotExist:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+
+    auth_error = oauth_platform.authenticate_owner_client(
+        request,
+        payload,
+        profile,
+        get_client_credentials,
+    )
+    if auth_error:
+        return auth_error
+
     OwnerAccessToken.objects.filter(
+        owner=profile,
+    ).filter(
         Q(token=token_value) | Q(refresh_token=token_value),
     ).update(revoked_at=timezone.now())
     return JsonResponse({'data': {'revoked': True}})
@@ -442,12 +461,12 @@ def read_request_payload(request):
 def validate_authorize_request(request, params):
     if params['response_type'] != 'code':
         return None, 'response_type must be code'
+    if not params['client_id']:
+        return None, 'client_id is required'
     if not params['redirect_uri']:
         return None, 'redirect_uri is required'
     if not is_allowed_redirect_uri(request, params['redirect_uri']):
         return None, 'redirect_uri is not allowed'
-    if not params['client_id']:
-        return None, None
 
     try:
         return OwnerProfile.objects.get(client_id=params['client_id']), None
@@ -477,6 +496,7 @@ def redirect_with_authorization_code(profile, params):
         owner=profile,
         redirect_uri=params['redirect_uri'],
         state=params['state'],
+        scope=normalize_scope(params.get('scope')),
     )
     separator = '&' if '?' in params['redirect_uri'] else '?'
     redirect_url = f'{params["redirect_uri"]}{separator}code={code.code}'
@@ -490,6 +510,7 @@ def redirect_with_authorization_code(profile, params):
 def issue_token_from_authorization_code(profile, payload):
     code_value = str(payload.get('code', '')).strip()
     redirect_uri = str(payload.get('redirect_uri', '')).strip()
+    state = str(payload.get('state', '')).strip()
     if not code_value or not redirect_uri:
         return JsonResponse({'error': 'code and redirect_uri are required'}, status=400)
 
@@ -501,9 +522,12 @@ def issue_token_from_authorization_code(profile, payload):
     if code.is_used or code.is_expired or code.redirect_uri != redirect_uri:
         return JsonResponse({'error': 'invalid_grant'}, status=400)
 
+    if code.state and code.state != state:
+        return JsonResponse({'error': 'invalid_grant'}, status=400)
+
     code.used_at = timezone.now()
     code.save(update_fields=['used_at'])
-    token = OwnerAccessToken.objects.create(owner=profile)
+    token = OwnerAccessToken.objects.create(owner=profile, scope=code.scope)
     return JsonResponse(build_token_response(token))
 
 
@@ -522,7 +546,7 @@ def issue_token_from_refresh_token(profile, payload):
 
     token.revoked_at = timezone.now()
     token.save(update_fields=['revoked_at'])
-    next_token = OwnerAccessToken.objects.create(owner=profile)
+    next_token = OwnerAccessToken.objects.create(owner=profile, scope=token.scope)
     return JsonResponse(build_token_response(next_token))
 
 
@@ -535,11 +559,38 @@ def build_token_response(token):
         'token_type': 'Bearer',
         'expires_in': expires_in,
         'refresh_expires_in': refresh_expires_in,
-        'scope': 'owner:reviews',
+        'scope': token.scope,
         'client_id': token.owner.client_id,
         'place_id': token.owner.place_id,
         'place_name': token.owner.place_name,
     }
+
+
+def authenticate_oauth_client(request, payload, profile):
+    client_id, client_secret = get_client_credentials(request, payload)
+    if not client_id:
+        client_id = str(payload.get('client_id', '')).strip()
+    if client_id != profile.client_id:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+    if not client_secret:
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+    if not secrets.compare_digest(client_secret, profile.client_secret):
+        return JsonResponse({'error': 'invalid_client'}, status=401)
+    return None
+
+
+def normalize_scope(scope_value):
+    scope = str(scope_value or 'owner:reviews').strip()
+    return scope or 'owner:reviews'
+
+
+def token_allows_scope(token, required_scope):
+    granted_scopes = {
+        part.strip()
+        for part in (token.scope or '').split()
+        if part.strip()
+    }
+    return required_scope in granted_scopes
 
 
 def validate_review_payload(payload):
@@ -617,7 +668,7 @@ def get_reply_owner(request, place_id):
     if profile and profile.place_id == place_id:
         return profile
 
-    profile = get_owner_profile_by_access_token(request)
+    profile = get_owner_profile_by_access_token(request, required_scope='owner:reviews')
     if profile and profile.place_id == place_id:
         return profile
 
@@ -643,7 +694,7 @@ def get_client_credentials(request, payload):
     )
 
 
-def get_owner_profile_by_access_token(request):
+def get_owner_profile_by_access_token(request, required_scope=None):
     authorization = request.headers.get('Authorization', '')
     if not authorization.startswith('Bearer '):
         return None
@@ -659,6 +710,9 @@ def get_owner_profile_by_access_token(request):
 
     if token.is_revoked or token.is_expired:
         token.delete()
+        return None
+
+    if required_scope and not token_allows_scope(token, required_scope):
         return None
 
     return token.owner

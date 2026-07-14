@@ -44,6 +44,31 @@ def default_authorization_code_expires_at():
     return timezone.now() + timedelta(minutes=5)
 
 
+class PlatformOAuthClient(models.Model):
+    """Google OAuth-style third-party app registration (e.g. ShopHub)."""
+
+    name = models.CharField(max_length=100)
+    client_id = models.CharField(max_length=128, unique=True)
+    client_secret = models.CharField(max_length=128)
+    redirect_uris = models.TextField(
+        help_text='One redirect URI per line (exact match).',
+    )
+    scopes = models.CharField(max_length=255, default='owner:reviews')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+    def allows_redirect_uri(self, redirect_uri):
+        allowed = [line.strip() for line in self.redirect_uris.splitlines() if line.strip()]
+        return redirect_uri in allowed
+
+
 class OwnerProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -79,9 +104,17 @@ class OwnerAuthorizationCode(models.Model):
         on_delete=models.CASCADE,
         related_name='oauth_codes',
     )
+    platform_client = models.ForeignKey(
+        PlatformOAuthClient,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='oauth_codes',
+    )
     code = models.CharField(max_length=160, unique=True, default=generate_owner_authorization_code)
     redirect_uri = models.URLField(max_length=500)
     state = models.CharField(max_length=255, blank=True)
+    scope = models.CharField(max_length=255, default='owner:reviews')
     expires_at = models.DateTimeField(default=default_authorization_code_expires_at)
     used_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -113,6 +146,7 @@ class OwnerAccessToken(models.Model):
     )
     token = models.CharField(max_length=160, unique=True, default=generate_owner_access_token)
     refresh_token = models.CharField(max_length=180, unique=True, default=generate_owner_refresh_token)
+    scope = models.CharField(max_length=255, default='owner:reviews')
     expires_at = models.DateTimeField(default=default_token_expires_at)
     refresh_expires_at = models.DateTimeField(default=default_refresh_expires_at)
     revoked_at = models.DateTimeField(null=True, blank=True)

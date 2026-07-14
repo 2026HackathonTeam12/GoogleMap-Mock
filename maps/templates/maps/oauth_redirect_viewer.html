@@ -22,8 +22,16 @@
             </header>
             <dl class="owner-summary oauth-summary">
                 <div>
+                    <dt>Client ID</dt>
+                    <dd><input id="clientIdInput" type="text" placeholder="oci_..." autocomplete="off"></dd>
+                </div>
+                <div>
+                    <dt>Client Secret</dt>
+                    <dd><input id="clientSecretInput" type="password" placeholder="ocs_..." autocomplete="off"></dd>
+                </div>
+                <div>
                     <dt>진행 상태</dt>
-                    <dd id="flowStatus">페이지 로드됨</dd>
+                    <dd id="flowStatus">Client ID/Secret 입력 후 실행하세요</dd>
                 </div>
                 <div>
                     <dt>Access Token 남은 시간</dt>
@@ -91,7 +99,8 @@
         const authorizeUrl = document.querySelector('#authorizeUrl');
         const redirectUri = document.querySelector('#redirectUri');
         const codeValue = document.querySelector('#redirectCode');
-        const clientIdValue = document.querySelector('#redirectClientId');
+        const clientIdInput = document.querySelector('#clientIdInput');
+        const clientSecretInput = document.querySelector('#clientSecretInput');
         const stateValue = document.querySelector('#redirectState');
         const errorValue = document.querySelector('#redirectError');
         const accessTokenValue = document.querySelector('#accessTokenValue');
@@ -102,6 +111,8 @@
         let accessToken = '';
         let refreshToken = '';
         let clientId = '';
+        let clientSecret = '';
+        const clientIdValue = document.querySelector('#redirectClientId');
         let accessTokenExpiresAt = 0;
         let refreshTokenExpiresAt = 0;
         let tokenTimer = null;
@@ -111,10 +122,17 @@
         }
 
         function startFlow() {
+            clientId = clientIdInput.value.trim();
+            clientSecret = clientSecretInput.value.trim();
+            if (!clientId || !clientSecret) {
+                setStatus('Client ID와 Client Secret을 입력해주세요.');
+                return;
+            }
             expectedState = crypto.randomUUID();
             const callbackUrl = `${window.location.origin}/oauth/callback/`;
             const params = new URLSearchParams({
                 response_type: 'code',
+                client_id: clientId,
                 redirect_uri: callbackUrl,
                 state: expectedState,
                 scope: 'owner:reviews',
@@ -183,8 +201,10 @@
             const requestBody = {
                 grant_type: 'authorization_code',
                 client_id: clientId,
+                client_secret: clientSecret,
                 code,
                 redirect_uri: `${window.location.origin}/oauth/callback/`,
+                state: expectedState,
             };
             appendTrace('3. Token Request', {
                 request: {

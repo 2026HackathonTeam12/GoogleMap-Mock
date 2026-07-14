@@ -1,0 +1,809 @@
+openapi: 3.0.3
+
+info:
+  title: ShopHub MockMap API
+  version: 1.0.0
+  description: |
+    장소 기반 리뷰 서비스 API입니다.
+    일반 사용자는 리뷰를 작성·삭제할 수 있으며,
+    점주는 OAuth2 Client Credentials 또는 세션 로그인으로 인증 후 답글을 관리합니다.
+
+servers:
+  - url: http://localhost:8000
+    description: 로컬 개발 서버
+
+tags:
+  - name: Health
+    description: 서버 상태 확인
+  - name: OAuth
+    description: 점주 OAuth2 토큰 발급
+  - name: Reviews
+    description: 리뷰 CRUD
+  - name: Replies
+    description: 점주 답글 관리
+  - name: Owner
+    description: 점주 계정 및 자격증명 관리
+  - name: Docs
+    description: API 문서
+
+# ─────────────────────────────────────────────
+# Security Schemes
+# ─────────────────────────────────────────────
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: OAuthAccessToken
+      description: |
+        `POST /oauth/token/` 에서 발급받은 access_token을 사용합니다.
+        형식: `Authorization: Bearer oat_...`
+
+    OAuthClientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: /oauth/token/
+          scopes:
+            owner:reviews: 점주 가게 리뷰 조회 및 답글 관리
+
+    OwnerSession:
+      type: apiKey
+      in: cookie
+      name: sessionid
+      description: |
+        `POST /owner/login/` 으로 로그인하면 발급되는 Django 세션 쿠키입니다.
+        OwnerProfile이 연결된 점주 계정만 유효합니다.
+
+  # ─────────────────────────────────────────────
+  # Schemas
+  # ─────────────────────────────────────────────
+  schemas:
+
+    # ── 공통 에러 ──────────────────────────────
+    ErrorSingle:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "리뷰를 찾을 수 없습니다."
+
+    ErrorFields:
+      type: object
+      properties:
+        errors:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            rating: "1~5 사이의 정수여야 합니다."
+            content: "내용을 입력하세요."
+
+    # ── 답글 ──────────────────────────────────
+    Reply:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 7
+        content:
+          type: string
+          example: "소중한 리뷰 감사합니다!"
+        owner_name:
+          type: string
+          example: "스타벅스 강남점"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-07-13T09:00:00+09:00"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-07-13T10:30:00+09:00"
+
+    # ── 리뷰 ──────────────────────────────────
+    Review:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 42
+        place_id:
+          type: string
+          example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+        place_name:
+          type: string
+          example: "스타벅스 강남점"
+        author_name:
+          type: string
+          example: "홍길동"
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 4
+        content:
+          type: string
+          example: "커피가 맛있어요."
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-07-13T08:00:00+09:00"
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reply'
+
+    ReviewListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Review'
+        place_id:
+          type: string
+          example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+
+    ReviewSingleResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Review'
+
+    # ── 리뷰 작성 요청 ─────────────────────────
+    ReviewCreate:
+      type: object
+      required:
+        - place_id
+        - place_name
+        - author_name
+        - rating
+        - content
+        - delete_password
+      properties:
+        place_id:
+          type: string
+          example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+        place_name:
+          type: string
+          example: "스타벅스 강남점"
+        author_name:
+          type: string
+          maxLength: 80
+          example: "홍길동"
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+          example: 5
+        content:
+          type: string
+          maxLength: 2000
+          example: "분위기가 너무 좋아요!"
+        delete_password:
+          type: string
+          minLength: 4
+          example: "pass1234"
+
+    # ── 리뷰 삭제 요청 ─────────────────────────
+    ReviewDelete:
+      type: object
+      required:
+        - delete_password
+      properties:
+        delete_password:
+          type: string
+          example: "pass1234"
+
+    ReviewDeleteResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            deleted:
+              type: boolean
+              example: true
+
+    # ── 답글 작성·수정 요청 ────────────────────
+    ReplyCreate:
+      type: object
+      required:
+        - content
+      properties:
+        content:
+          type: string
+          maxLength: 2000
+          example: "방문해주셔서 감사합니다!"
+
+    # ── OAuth 토큰 ─────────────────────────────
+    OAuthTokenRequest:
+      type: object
+      required:
+        - grant_type
+        - client_id
+        - client_secret
+      properties:
+        grant_type:
+          type: string
+          enum:
+            - client_credentials
+          example: "client_credentials"
+        client_id:
+          type: string
+          example: "oci_AbCdEf1234567890"
+        client_secret:
+          type: string
+          example: "ocs_XyZaBcDeFgHiJkLmNoPqRsTuVwXyZ12"
+
+    OAuthTokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: "oat_A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0"
+        token_type:
+          type: string
+          example: "Bearer"
+        expires_in:
+          type: integer
+          description: 만료까지 남은 시간(초)
+          example: 3600
+        scope:
+          type: string
+          example: "owner:reviews"
+        place_id:
+          type: string
+          example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+        place_name:
+          type: string
+          example: "스타벅스 강남점"
+
+# ─────────────────────────────────────────────
+# Paths
+# ─────────────────────────────────────────────
+paths:
+
+  # ── Health ────────────────────────────────
+  /health/:
+    get:
+      tags:
+        - Health
+      summary: 서버 상태 확인
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 서버 정상
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ok"
+
+  # ── OAuth ─────────────────────────────────
+  /oauth/token/:
+    post:
+      tags:
+        - OAuth
+      summary: 점주 OAuth2 액세스 토큰 발급
+      operationId: issueOwnerToken
+      description: |
+        점주의 `client_id` / `client_secret` 으로 Bearer 토큰을 발급합니다.
+
+        **인증 방법 (택 1)**
+        - **Body JSON** : `client_id`, `client_secret` 필드를 JSON으로 전송
+        - **Basic Auth** : `Authorization: Basic base64(client_id:client_secret)` 헤더와
+          `grant_type=client_credentials` form body 전송
+
+        발급된 토큰은 **1시간(3600초)** 후 만료됩니다.
+        `client_id` / `client_secret` 은 `/owner/account/` 페이지에서 확인하거나 재발급할 수 있습니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthTokenRequest'
+            example:
+              grant_type: client_credentials
+              client_id: "oci_AbCdEf1234567890"
+              client_secret: "ocs_XyZaBcDeFgHiJkLmNoPqRsTuVwXyZ12"
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                grant_type:
+                  type: string
+                  enum: [client_credentials]
+      responses:
+        '200':
+          description: 발급된 Bearer 토큰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthTokenResponse'
+        '400':
+          description: 지원하지 않는 grant_type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "unsupported_grant_type"
+        '401':
+          description: client_id 또는 client_secret 불일치
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "invalid_client"
+
+  # ── Reviews ───────────────────────────────
+  /api/reviews/:
+    get:
+      tags:
+        - Reviews
+      summary: 장소 리뷰 목록 조회
+      operationId: listReviews
+      description: |
+        **공개 조회**: `place_id` 쿼리 파라미터를 사용합니다.
+
+        **점주 조회**: Bearer 토큰만 헤더에 담아 요청하면, 해당 점주의 가게 리뷰를 반환합니다.
+        이 경우 `place_id` 쿼리는 생략 가능합니다.
+      security:
+        - {}
+        - BearerAuth: []
+        - OAuthClientCredentials: [owner:reviews]
+      parameters:
+        - name: place_id
+          in: query
+          required: false
+          description: Google Maps 장소 ID (Bearer 토큰 없이 요청 시 필수)
+          schema:
+            type: string
+            example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+      responses:
+        '200':
+          description: 리뷰 목록
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewListResponse'
+        '400':
+          description: place_id 누락 (인증 없이 요청할 때)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "place_id is required"
+
+    post:
+      tags:
+        - Reviews
+      summary: 리뷰 작성
+      operationId: createReview
+      description: |
+        인증 없이 누구나 리뷰를 작성할 수 있습니다.
+        삭제 시 필요한 `delete_password`를 함께 설정합니다 (최소 4자).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewCreate'
+      responses:
+        '201':
+          description: 작성된 리뷰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSingleResponse'
+        '400':
+          description: 유효성 검사 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorFields'
+
+  /api/reviews/{review_id}/:
+    delete:
+      tags:
+        - Reviews
+      summary: 리뷰 삭제
+      operationId: deleteReview
+      description: |
+        작성 시 등록한 `delete_password`를 사용해 리뷰를 삭제합니다.
+        인증 불필요.
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 42
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDelete'
+      responses:
+        '200':
+          description: 삭제 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDeleteResponse'
+        '403':
+          description: 삭제 비밀번호 불일치
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "delete password is incorrect"
+        '404':
+          description: 리뷰 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "review not found"
+
+  # ── Replies ───────────────────────────────
+  /api/reviews/{review_id}/reply/:
+    post:
+      tags:
+        - Replies
+      summary: 점주 답글 작성
+      operationId: createReply
+      description: |
+        해당 리뷰가 속한 가게의 점주만 답글을 작성할 수 있습니다.
+
+        **인증 방법 (택 1)**
+        - `Authorization: Bearer {access_token}` 헤더
+        - 점주 세션 쿠키(`sessionid`)
+      security:
+        - BearerAuth: []
+        - OAuthClientCredentials: [owner:reviews]
+        - OwnerSession: []
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 42
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyCreate'
+      responses:
+        '200':
+          description: 답글이 추가된 리뷰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSingleResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "authentication required"
+        '403':
+          description: 해당 가게 점주 권한 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "you are not the owner of this place"
+        '404':
+          description: 리뷰 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+              example:
+                error: "review not found"
+
+  /api/reviews/{review_id}/reply/{reply_id}/:
+    patch:
+      tags:
+        - Replies
+      summary: 점주 답글 수정
+      operationId: updateReply
+      description: 해당 가게의 점주만 수정할 수 있습니다. Bearer 토큰 또는 세션 인증이 필요합니다.
+      security:
+        - BearerAuth: []
+        - OAuthClientCredentials: [owner:reviews]
+        - OwnerSession: []
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 42
+        - name: reply_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 7
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplyCreate'
+      responses:
+        '200':
+          description: 수정된 답글이 포함된 리뷰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSingleResponse'
+        '400':
+          description: 유효성 검사 실패
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorFields'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+        '403':
+          description: 해당 가게 점주 권한 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+        '404':
+          description: 리뷰 또는 답글 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+
+    delete:
+      tags:
+        - Replies
+      summary: 점주 답글 삭제
+      operationId: deleteReply
+      description: 해당 가게의 점주만 삭제할 수 있습니다. Bearer 토큰 또는 세션 인증이 필요합니다.
+      security:
+        - BearerAuth: []
+        - OAuthClientCredentials: [owner:reviews]
+        - OwnerSession: []
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 42
+        - name: reply_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 7
+      responses:
+        '200':
+          description: 답글이 삭제된 리뷰
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewSingleResponse'
+        '401':
+          description: 인증 필요
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+        '403':
+          description: 해당 가게 점주 권한 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+        '404':
+          description: 리뷰 또는 답글 없음
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorSingle'
+
+  # ── Owner ─────────────────────────────────
+  /owner/signup/:
+    get:
+      tags:
+        - Owner
+      summary: 점주 회원가입 폼
+      operationId: ownerSignupForm
+      description: Google Maps 장소 선택이 포함된 회원가입 HTML 페이지를 반환합니다.
+      responses:
+        '200':
+          description: 회원가입 HTML 폼
+
+    post:
+      tags:
+        - Owner
+      summary: 점주 회원가입
+      operationId: ownerSignup
+      description: |
+        점주 계정을 생성합니다. 성공 시 `/owner/account/` 로 리다이렉트됩니다.
+
+        **유효성 규칙**
+        - `username`: 최대 150자, 중복 불가
+        - `password`: 최소 8자
+        - `password_confirm`: `password`와 일치해야 함
+        - `place_id`: 최대 255자, 가게당 하나의 계정만 허용
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+                - password_confirm
+                - place_id
+              properties:
+                username:
+                  type: string
+                  maxLength: 150
+                  example: "owner_홍길동"
+                password:
+                  type: string
+                  minLength: 8
+                  example: "securePass1!"
+                password_confirm:
+                  type: string
+                  example: "securePass1!"
+                place_id:
+                  type: string
+                  maxLength: 255
+                  example: "ChIJN1t_tDeuEmsRUsoyG83frY4"
+                place_name:
+                  type: string
+                  maxLength: 255
+                  example: "스타벅스 강남점"
+                place_address:
+                  type: string
+                  maxLength: 500
+                  example: "서울 강남구 테헤란로 123"
+      responses:
+        '302':
+          description: 회원가입 성공 → `/owner/account/` 리다이렉트
+        '400':
+          description: 유효성 검사 실패 (HTML 폼 재표시)
+
+  /owner/login/:
+    get:
+      tags:
+        - Owner
+      summary: 점주 로그인 폼
+      operationId: ownerLoginForm
+      responses:
+        '200':
+          description: 로그인 HTML 폼
+
+    post:
+      tags:
+        - Owner
+      summary: 점주 로그인
+      operationId: ownerLogin
+      description: |
+        세션 기반 로그인입니다. 성공 시 세션 쿠키(`sessionid`)가 발급되고
+        `/owner/account/` 로 리다이렉트됩니다.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - username
+                - password
+              properties:
+                username:
+                  type: string
+                  example: "owner_홍길동"
+                password:
+                  type: string
+                  example: "securePass1!"
+      responses:
+        '302':
+          description: 로그인 성공 → `/owner/account/` 리다이렉트
+        '400':
+          description: 사용자명 또는 비밀번호 오류
+        '403':
+          description: OwnerProfile이 없는 일반 계정
+
+  /owner/logout/:
+    post:
+      tags:
+        - Owner
+      summary: 점주 로그아웃
+      operationId: ownerLogout
+      security:
+        - OwnerSession: []
+      responses:
+        '302':
+          description: 로그아웃 성공 → `/` 리다이렉트
+
+  /owner/account/:
+    get:
+      tags:
+        - Owner
+      summary: 점주 자격증명 조회 페이지
+      operationId: ownerAccountGet
+      description: |
+        로그인한 점주의 `client_id` / `client_secret` 을 확인하는 HTML 페이지를 반환합니다.
+        점주 계정(OwnerProfile 연결)만 접근 가능합니다.
+      security:
+        - OwnerSession: []
+      responses:
+        '200':
+          description: 자격증명 HTML 페이지
+        '403':
+          description: OwnerProfile이 없는 계정 또는 미로그인
+
+    post:
+      tags:
+        - Owner
+      summary: 점주 자격증명 재발급
+      operationId: ownerAccountRotate
+      description: |
+        `client_id` / `client_secret` 을 새로 발급합니다.
+        기존에 발급된 모든 액세스 토큰이 즉시 무효화됩니다.
+      security:
+        - OwnerSession: []
+      responses:
+        '302':
+          description: 재발급 완료 → `/owner/account/` 리다이렉트
+        '403':
+          description: OwnerProfile이 없는 계정 또는 미로그인
+
+  # ── Docs ──────────────────────────────────
+  /api/openapi.json:
+    get:
+      tags:
+        - Docs
+      summary: OpenAPI 3.0 스키마 (JSON)
+      operationId: getOpenApiSchema
+      responses:
+        '200':
+          description: OpenAPI 3.0.3 JSON 스키마
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/docs/:
+    get:
+      tags:
+        - Docs
+      summary: Swagger UI
+      operationId: getSwaggerUI
+      description: 브라우저에서 API를 탐색할 수 있는 Swagger UI 페이지입니다.
+      responses:
+        '200':
+          description: Swagger UI HTML 페이지

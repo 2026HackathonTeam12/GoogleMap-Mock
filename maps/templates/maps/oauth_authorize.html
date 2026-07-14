@@ -13,10 +13,25 @@
             <header class="owner-header owner-header-stack">
                 <div>
                     <p class="owner-kicker">OAuth 승인</p>
-                    <h1>점주 로그인</h1>
+                    <h1>{% if platform_client %}ShopHub 연동{% else %}점주 로그인{% endif %}</h1>
                 </div>
             </header>
-            {% if profile %}
+            {% if platform_client %}
+            <dl class="owner-summary oauth-summary">
+                <div>
+                    <dt>요청 앱</dt>
+                    <dd>{{ platform_client.name }}</dd>
+                </div>
+                <div>
+                    <dt>권한</dt>
+                    <dd>가게 리뷰 조회 및 답글 관리</dd>
+                </div>
+            </dl>
+            <p class="owner-hint">
+                MockMap 점주 계정으로 로그인하면 ShopHub에서 리뷰를 연동할 수 있습니다.
+                <a href="/owner/signup/">계정이 없으면 가입하기</a>
+            </p>
+            {% elif profile %}
             <dl class="owner-summary oauth-summary">
                 <div>
                     <dt>요청 앱</dt>
@@ -49,7 +64,7 @@
                     <span>비밀번호</span>
                     <input name="password" type="password" autocomplete="current-password" required>
                 </label>
-                <button type="submit">승인하고 계속</button>
+                <button type="submit">{% if platform_client %}ShopHub 연동 계속{% else %}승인하고 계속{% endif %}</button>
             </form>
         </section>
     </main>

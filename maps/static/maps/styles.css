@@ -568,6 +568,11 @@ input {
     background: #fff;
 }
 
+.review-card.is-highlighted {
+    border-color: #3dd7af;
+    box-shadow: 0 0 0 3px rgba(61, 215, 175, 0.18);
+}
+
 .review-card-head {
     display: flex;
     align-items: center;

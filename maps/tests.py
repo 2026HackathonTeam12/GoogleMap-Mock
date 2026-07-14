@@ -3,7 +3,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
-from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, Review, ReviewReply
+from .models import OwnerAccessToken, OwnerAuthorizationCode, OwnerProfile, PlatformOAuthClient, Review, ReviewReply
 
 
 class MapPageTests(TestCase):
@@ -54,14 +54,17 @@ class ReviewApiTests(TestCase):
         code = OwnerAuthorizationCode.objects.create(
             owner=profile,
             redirect_uri='http://testserver/oauth/callback/',
+            state='state-123',
         )
         response = self.client.post(
             '/oauth/token/',
             data=json.dumps({
                 'grant_type': 'authorization_code',
                 'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
                 'code': code.code,
                 'redirect_uri': code.redirect_uri,
+                'state': 'state-123',
             }),
             content_type='application/json',
         )
@@ -482,9 +485,9 @@ class ReviewApiTests(TestCase):
         self.assertIn('&state=state-123', response.headers['Location'])
         self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=profile).count(), 1)
 
-    def test_oauth_authorize_without_client_id_uses_logged_in_owner(self):
+    def test_oauth_authorize_requires_client_id(self):
         owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
-        profile = OwnerProfile.objects.create(
+        OwnerProfile.objects.create(
             user=owner,
             place_id='place-1',
             place_name='테스트 카페',
@@ -503,12 +506,28 @@ class ReviewApiTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 302)
-        self.assertIn('http://localhost:8000/oauth/callback/?code=', response.headers['Location'])
-        self.assertIn('&client_id=owner-client', response.headers['Location'])
-        self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=profile).count(), 1)
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'client_id is required', status_code=400)
 
-    def test_oauth_authorize_get_without_client_id_uses_current_owner(self):
+    def test_oauth_authorize_get_requires_client_id(self):
+        owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
+        OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            client_id='owner-client',
+            client_secret='owner-secret',
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(
+            '/oauth/authorize/?response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8000%2Foauth%2Fcallback%2F&state=state-123&scope=owner%3Areviews',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'client_id is required', status_code=400)
+
+    def test_oauth_authorize_get_with_client_id_uses_current_owner(self):
         owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
         profile = OwnerProfile.objects.create(
             user=owner,
@@ -520,7 +539,7 @@ class ReviewApiTests(TestCase):
         self.client.force_login(owner)
 
         response = self.client.get(
-            '/oauth/authorize/?response_type=code&redirect_uri=http%3A%2F%2F127.0.0.1%3A8000%2Foauth%2Fcallback%2F&state=state-123&scope=owner%3Areviews',
+            '/oauth/authorize/?response_type=code&client_id=owner-client&redirect_uri=http%3A%2F%2F127.0.0.1%3A8000%2Foauth%2Fcallback%2F&state=state-123&scope=owner%3Areviews',
         )
 
         self.assertEqual(response.status_code, 302)
@@ -561,6 +580,7 @@ class ReviewApiTests(TestCase):
         code = OwnerAuthorizationCode.objects.create(
             owner=profile,
             redirect_uri='http://testserver/oauth/callback/',
+            state='state-123',
         )
 
         response = self.client.post(
@@ -568,8 +588,10 @@ class ReviewApiTests(TestCase):
             data=json.dumps({
                 'grant_type': 'authorization_code',
                 'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
                 'code': code.code,
                 'redirect_uri': code.redirect_uri,
+                'state': 'state-123',
             }),
             content_type='application/json',
         )
@@ -601,6 +623,7 @@ class ReviewApiTests(TestCase):
             data=json.dumps({
                 'grant_type': 'refresh_token',
                 'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
                 'refresh_token': token.refresh_token,
             }),
             content_type='application/json',
@@ -625,13 +648,42 @@ class ReviewApiTests(TestCase):
 
         revoke_response = self.client.post(
             '/oauth/revoke/',
-            data=json.dumps({'token': token.token}),
+            data=json.dumps({
+                'token': token.token,
+                'client_id': profile.client_id,
+                'client_secret': profile.client_secret,
+            }),
             content_type='application/json',
         )
         reviews_response = self.client.get('/api/reviews/', HTTP_AUTHORIZATION=f'Bearer {token.token}')
 
         self.assertEqual(revoke_response.status_code, 200)
         self.assertEqual(reviews_response.status_code, 400)
+
+    def test_oauth_token_rejects_invalid_client_secret(self):
+        owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
+        profile = OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            client_id='owner-client',
+            client_secret='owner-secret',
+        )
+        token = OwnerAccessToken.objects.create(owner=profile)
+
+        response = self.client.post(
+            '/oauth/token/',
+            data=json.dumps({
+                'grant_type': 'refresh_token',
+                'client_id': profile.client_id,
+                'client_secret': 'wrong-secret',
+                'refresh_token': token.refresh_token,
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['error'], 'invalid_client')
 
     def test_owner_logout(self):
         owner = get_user_model().objects.create_user(username='owner-logout', password='password123')
@@ -668,3 +720,100 @@ class ReviewApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('/api/reviews/', response.json()['paths'])
+
+
+class PlatformOAuthTests(TestCase):
+    redirect_uri = 'http://localhost:8080/api/integrations/MOCK_MAP/oauth/callback'
+
+    def setUp(self):
+        self.platform = PlatformOAuthClient.objects.create(
+            name='ShopHub Test',
+            client_id='oci_shophub_test',
+            client_secret='ocs_shophub_test_secret',
+            redirect_uris=self.redirect_uri,
+            scopes='owner:reviews',
+            is_active=True,
+        )
+        self.owner = get_user_model().objects.create_user(username='platform-owner', password='password123')
+        self.profile = OwnerProfile.objects.create(
+            user=self.owner,
+            place_id='place-platform-1',
+            place_name='플랫폼 테스트 카페',
+        )
+
+    def test_platform_authorize_get_shows_login_page(self):
+        response = self.client.get(
+            '/oauth/authorize/',
+            {
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+                'scope': 'owner:reviews',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'ShopHub')
+        self.assertContains(response, 'MockMap 점주 계정으로 로그인')
+
+    def test_platform_authorize_post_redirects_with_code(self):
+        response = self.client.post(
+            '/oauth/authorize/',
+            data={
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+                'username': 'platform-owner',
+                'password': 'password123',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f'{self.redirect_uri}?code=', response.headers['Location'])
+        self.assertIn('state=state-platform', response.headers['Location'])
+        code = OwnerAuthorizationCode.objects.get(owner=self.profile, platform_client=self.platform)
+        self.assertFalse(code.is_used)
+
+    def test_platform_token_exchange_returns_place_id(self):
+        code = OwnerAuthorizationCode.objects.create(
+            owner=self.profile,
+            platform_client=self.platform,
+            redirect_uri=self.redirect_uri,
+            state='state-platform',
+        )
+        response = self.client.post(
+            '/oauth/token/',
+            data=json.dumps({
+                'grant_type': 'authorization_code',
+                'client_id': self.platform.client_id,
+                'client_secret': self.platform.client_secret,
+                'code': code.code,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['place_id'], 'place-platform-1')
+        self.assertEqual(payload['place_name'], '플랫폼 테스트 카페')
+        self.assertEqual(payload['client_id'], self.platform.client_id)
+        self.assertIn('access_token', payload)
+        self.assertIn('refresh_token', payload)
+
+    def test_platform_authorize_rejects_invalid_redirect_uri(self):
+        response = self.client.get(
+            '/oauth/authorize/',
+            {
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': 'http://evil.example/callback',
+                'state': 'state-platform',
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'redirect_uri is not allowed', status_code=400)

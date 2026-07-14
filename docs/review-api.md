@@ -27,7 +27,7 @@ Query:
 | 이름 | 필수 | 설명 |
 | --- | --- | --- |
 | `response_type` | Y | `code` |
-| `client_id` | N | 특정 점주 client로 제한할 때 사용합니다. 테스트 페이지에서는 로그인한 점주의 client_id가 callback으로 전달됩니다. |
+| `client_id` | Y | 점주 OAuth client ID |
 | `redirect_uri` | Y | code를 받을 callback URL |
 | `state` | N | CSRF 방지용 임의 문자열 |
 | `scope` | N | `owner:reviews` |
@@ -48,8 +48,10 @@ Authorization code 교환:
 {
   "grant_type": "authorization_code",
   "client_id": "oci_xxx",
+  "client_secret": "ocs_xxx",
   "code": "oac_xxx",
-  "redirect_uri": "http://localhost:8000/oauth/callback/"
+  "redirect_uri": "http://localhost:8000/oauth/callback/",
+  "state": "state-value"
 }
 ```
 
@@ -59,9 +61,12 @@ Refresh token 교환:
 {
   "grant_type": "refresh_token",
   "client_id": "oci_xxx",
+  "client_secret": "ocs_xxx",
   "refresh_token": "ort_xxx"
 }
 ```
+
+`client_id`와 `client_secret`은 `/owner/account/`에서 확인합니다. 서버 간(confidential client) 연동에서는 두 값 모두 `/oauth/token/` 요청에 포함해야 합니다.
 
 응답:
 
@@ -84,7 +89,9 @@ Refresh token 교환:
 
 ```json
 {
-  "token": "oat_xxx 또는 ort_xxx"
+  "token": "oat_xxx 또는 ort_xxx",
+  "client_id": "oci_xxx",
+  "client_secret": "ocs_xxx"
 }
 ```
 

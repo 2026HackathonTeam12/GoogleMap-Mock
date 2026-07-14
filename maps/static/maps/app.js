@@ -52,6 +52,7 @@ window.initGoogleMap = function initGoogleMap() {
 
     bindUiEvents();
     showNotice('지도 위 장소 아이콘을 클릭하거나 검색해서 Google Maps 장소 정보를 볼 수 있습니다.');
+    openPlaceFromQueryString();
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -62,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     activeProvider = 'leaflet';
     bindUiEvents();
     initLeafletMap();
+    openPlaceFromQueryString();
 });
 
 function initLeafletMap() {
@@ -229,10 +231,57 @@ function loadReviews(placeId) {
         .then((response) => response.json())
         .then((payload) => {
             renderReviews(payload.data || []);
+            scrollToReviewFromHash();
         })
         .catch(() => {
             showReviewMessage('리뷰를 불러오지 못했습니다.', true);
         });
+}
+
+function scrollToReviewFromHash() {
+    const match = window.location.hash.match(/^#review-(\d+)$/);
+    if (!match) {
+        return;
+    }
+
+    const reviewId = match[1];
+    const card = reviewList.querySelector(`[data-review-id="${reviewId}"]`);
+    if (!card) {
+        return;
+    }
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('is-highlighted');
+    const replyInput = card.querySelector('.reply-form textarea, .reply-form input[name="content"]');
+    if (replyInput instanceof HTMLElement) {
+        replyInput.focus();
+    }
+}
+
+function openPlaceFromQueryString() {
+    const params = new URLSearchParams(window.location.search);
+    const placeId = params.get('place_id')?.trim();
+    if (!placeId) {
+        return;
+    }
+
+    if (activeProvider === 'google' && typeof showGooglePlaceDetails === 'function') {
+        showGooglePlaceDetails(placeId);
+        return;
+    }
+
+    if (window.OWNER_PLACE_ID === placeId) {
+        renderPlaceDetails({
+            placeId,
+            name: window.OWNER_PLACE_NAME || placeId,
+            category: '내 업장',
+            address: '',
+            description: '점주 계정으로 연결된 가게입니다.',
+            hours: '영업시간 정보 없음',
+            contact: '연락처 정보 없음',
+            actions: [],
+        });
+    }
 }
 
 function renderReviews(reviews) {

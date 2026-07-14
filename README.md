@@ -60,6 +60,7 @@ GOOGLE_MAPS_API_KEY="your-google-maps-browser-key"
 - 지도에서 가게를 선택한 뒤 상세 패널의 `점주로 등록하기`를 누르면 해당 가게 정보가 채워진 가입 화면으로 이동합니다.
 - 점주 답글은 해당 가게를 가진 점주 로그인 세션 또는 OAuth bearer token으로만 작성할 수 있습니다.
 - OAuth `client_id`와 `client_secret`은 `/owner/account/`에서 확인하고 재발급할 수 있습니다.
+- OAuth token 교환(`/oauth/token/`)과 revoke(`/oauth/revoke/`)는 **client_id + client_secret** 검증이 필요합니다 (Google OAuth confidential client 방식).
 - 점주 웹 로그인은 `/owner/login/`에서 시작하며 로그인 후 `/owner/account/`로 이동합니다.
 - API 명세는 [docs/review-api.md](docs/review-api.md)에서 확인할 수 있습니다.
 - OpenAPI 문서는 `GET /api/openapi.json` 또는 [docs/review-openapi.json](docs/review-openapi.json)에서 확인할 수 있습니다.

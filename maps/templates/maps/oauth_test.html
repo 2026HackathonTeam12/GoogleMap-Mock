@@ -22,11 +22,15 @@
             <dl class="owner-summary oauth-summary">
                 <div>
                     <dt>Client ID</dt>
-                    <dd><code id="clientId">로그인 후 표시됩니다</code></dd>
+                    <dd><input id="clientIdInput" type="text" placeholder="oci_..." autocomplete="off"></dd>
+                </div>
+                <div>
+                    <dt>Client Secret</dt>
+                    <dd><input id="clientSecretInput" type="password" placeholder="ocs_..." autocomplete="off"></dd>
                 </div>
                 <div>
                     <dt>상태</dt>
-                    <dd id="oauthStatus">대기 중</dd>
+                    <dd id="oauthStatus">Client ID를 입력하세요</dd>
                 </div>
                 <div>
                     <dt>Access Token 남은 시간</dt>
@@ -51,7 +55,8 @@
         </section>
     </main>
     <script>
-        const clientIdValue = document.querySelector('#clientId');
+        const clientIdInput = document.querySelector('#clientIdInput');
+        const clientSecretInput = document.querySelector('#clientSecretInput');
         const placeName = document.querySelector('#oauthPlaceName');
         const statusText = document.querySelector('#oauthStatus');
         const accessTokenTtl = document.querySelector('#accessTokenTtl');
@@ -130,7 +135,18 @@
             return `${seconds}초`;
         }
 
+        let clientSecret = '';
+
+        function readClientCredentials() {
+            clientId = clientIdInput.value.trim();
+            clientSecret = clientSecretInput.value.trim();
+            if (!clientId || !clientSecret) {
+                throw new Error('Client ID와 Client Secret을 입력해주세요.');
+            }
+        }
+
         function exchangeCode(code) {
+            readClientCredentials();
             setStatus('토큰 발급 중');
             return fetch('/oauth/token/', {
                 method: 'POST',
@@ -138,8 +154,10 @@
                 body: JSON.stringify({
                     grant_type: 'authorization_code',
                     client_id: clientId,
+                    client_secret: clientSecret,
                     code,
                     redirect_uri: `${window.location.origin}/oauth/callback/`,
+                    state: oauthState,
                 }),
             })
                 .then((response) => response.json().then((payload) => ({ response, payload })))
@@ -150,7 +168,7 @@
                     accessToken = payload.access_token;
                     refreshToken = payload.refresh_token;
                     clientId = payload.client_id || clientId;
-                    clientIdValue.textContent = clientId;
+                    clientIdInput.value = clientId;
                     placeName.textContent = payload.place_name || '내 가게 리뷰';
                     setTokenTimes(payload);
                     refreshButton.disabled = false;
@@ -174,9 +192,16 @@
         }
 
         loginButton.addEventListener('click', () => {
+            try {
+                readClientCredentials();
+            } catch (error) {
+                setStatus(error.message);
+                return;
+            }
             oauthState = crypto.randomUUID();
             const params = new URLSearchParams({
                 response_type: 'code',
+                client_id: clientId,
                 redirect_uri: `${window.location.origin}/oauth/callback/`,
                 state: oauthState,
                 scope: 'owner:reviews',
@@ -193,6 +218,7 @@
                 body: JSON.stringify({
                     grant_type: 'refresh_token',
                     client_id: clientId,
+                    client_secret: clientSecret,
                     refresh_token: refreshToken,
                 }),
             })
@@ -214,7 +240,11 @@
             fetch('/oauth/revoke/', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: refreshToken || accessToken }),
+                body: JSON.stringify({
+                    token: refreshToken || accessToken,
+                    client_id: clientId,
+                    client_secret: clientSecret,
+                }),
             })
                 .then(() => {
                     accessToken = '';

@@ -10,5 +10,11 @@ else
   exit 1
 fi
 
-python3 manage.py migrate
-python3 manage.py runserver
+PYTHON="${VENV_PYTHON:-.venv/bin/python}"
+if [ ! -x "$PYTHON" ]; then
+  echo "가상환경을 찾을 수 없습니다. README.md의 Quick start로 .venv를 먼저 생성해주세요." >&2
+  exit 1
+fi
+
+"$PYTHON" manage.py migrate
+"$PYTHON" manage.py runserver
