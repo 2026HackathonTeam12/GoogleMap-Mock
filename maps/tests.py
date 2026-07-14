@@ -527,7 +527,7 @@ class ReviewApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertContains(response, 'client_id is required', status_code=400)
 
-    def test_oauth_authorize_get_with_client_id_uses_current_owner(self):
+    def test_oauth_authorize_get_with_client_id_shows_consent_for_current_owner(self):
         owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
         profile = OwnerProfile.objects.create(
             user=owner,
@@ -542,9 +542,36 @@ class ReviewApiTests(TestCase):
             '/oauth/authorize/?response_type=code&client_id=owner-client&redirect_uri=http%3A%2F%2F127.0.0.1%3A8000%2Foauth%2Fcallback%2F&state=state-123&scope=owner%3Areviews',
         )
 
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '연동을 허용할까요?')
+        self.assertContains(response, '허용하고 계속')
+        self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=profile).count(), 0)
+
+    def test_oauth_authorize_post_approve_issues_code_for_current_owner(self):
+        owner = get_user_model().objects.create_user(username='oauth-owner', password='password123')
+        profile = OwnerProfile.objects.create(
+            user=owner,
+            place_id='place-1',
+            place_name='테스트 카페',
+            client_id='owner-client',
+            client_secret='owner-secret',
+        )
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            '/oauth/authorize/',
+            data={
+                'response_type': 'code',
+                'client_id': 'owner-client',
+                'redirect_uri': 'http://127.0.0.1:8000/oauth/callback/',
+                'state': 'state-123',
+                'scope': 'owner:reviews',
+                'action': 'approve',
+            },
+        )
+
         self.assertEqual(response.status_code, 302)
         self.assertIn('http://127.0.0.1:8000/oauth/callback/?code=', response.headers['Location'])
-        self.assertIn('&client_id=owner-client', response.headers['Location'])
         self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=profile).count(), 1)
 
     def test_oauth_test_page_is_public(self):
@@ -756,6 +783,67 @@ class PlatformOAuthTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'ShopHub')
         self.assertContains(response, 'MockMap 점주 계정으로 로그인')
+
+    def test_platform_authorize_get_shows_consent_when_logged_in(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.get(
+            '/oauth/authorize/',
+            {
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+                'scope': 'owner:reviews',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '연동을 허용할까요?')
+        self.assertContains(response, '플랫폼 테스트 카페')
+        self.assertContains(response, '허용하고 계속')
+        self.assertContains(response, '다른 계정으로 로그인')
+        self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=self.profile).count(), 0)
+
+    def test_platform_authorize_post_approve_redirects_with_code(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            '/oauth/authorize/',
+            data={
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+                'action': 'approve',
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f'{self.redirect_uri}?code=', response.headers['Location'])
+        self.assertEqual(
+            OwnerAuthorizationCode.objects.filter(owner=self.profile, platform_client=self.platform).count(),
+            1,
+        )
+
+    def test_platform_authorize_post_switch_shows_login(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            '/oauth/authorize/',
+            data={
+                'response_type': 'code',
+                'client_id': self.platform.client_id,
+                'redirect_uri': self.redirect_uri,
+                'state': 'state-platform',
+                'action': 'switch',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '로그인하고 연동 계속')
+        self.assertContains(response, '계정명')
+        self.assertEqual(OwnerAuthorizationCode.objects.filter(owner=self.profile).count(), 0)
 
     def test_platform_authorize_post_redirects_with_code(self):
         response = self.client.post(

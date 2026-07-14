@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>OAuth 로그인</title>
+    <title>{% if mode == 'consent' %}OAuth 동의{% else %}OAuth 로그인{% endif %}</title>
     <link rel="stylesheet" href="{% static 'maps/styles.css' %}">
 </head>
 <body class="owner-page oauth-page">
@@ -13,9 +13,18 @@
             <header class="owner-header owner-header-stack">
                 <div>
                     <p class="owner-kicker">OAuth 승인</p>
-                    <h1>{% if platform_client %}ShopHub 연동{% else %}점주 로그인{% endif %}</h1>
+                    <h1>
+                        {% if mode == 'consent' %}
+                            연동을 허용할까요?
+                        {% elif platform_client %}
+                            ShopHub 연동
+                        {% else %}
+                            점주 로그인
+                        {% endif %}
+                    </h1>
                 </div>
             </header>
+
             {% if platform_client %}
             <dl class="owner-summary oauth-summary">
                 <div>
@@ -26,16 +35,18 @@
                     <dt>권한</dt>
                     <dd>가게 리뷰 조회 및 답글 관리</dd>
                 </div>
+                {% if mode == 'consent' and owner_profile %}
+                <div>
+                    <dt>연결될 가게</dt>
+                    <dd>{{ owner_profile.place_name }} ({{ owner_profile.place_id }})</dd>
+                </div>
+                {% endif %}
             </dl>
-            <p class="owner-hint">
-                MockMap 점주 계정으로 로그인하면 ShopHub에서 리뷰를 연동할 수 있습니다.
-                <a href="/owner/signup/">계정이 없으면 가입하기</a>
-            </p>
-            {% elif profile %}
+            {% elif profile or owner_profile %}
             <dl class="owner-summary oauth-summary">
                 <div>
                     <dt>요청 앱</dt>
-                    <dd>{{ profile.place_name }}</dd>
+                    <dd>{% if profile %}{{ profile.place_name }}{% else %}{{ owner_profile.place_name }}{% endif %}</dd>
                 </div>
                 <div>
                     <dt>권한</dt>
@@ -43,12 +54,19 @@
                 </div>
             </dl>
             {% endif %}
+
             {% if errors.oauth %}
             <p class="owner-error">{{ errors.oauth }}</p>
             {% endif %}
             {% if errors.account %}
             <p class="owner-error">{{ errors.account }}</p>
             {% endif %}
+
+            {% if mode == 'consent' and owner_profile %}
+            <p class="owner-hint">
+                현재 MockMap에 로그인된 점주 계정으로 ShopHub 연동을 허용합니다.
+                다른 가게를 연결하려면 계정 전환 후 비밀번호를 다시 입력하세요.
+            </p>
             <form class="owner-form" method="post">
                 {% csrf_token %}
                 <input type="hidden" name="response_type" value="{{ params.response_type }}">
@@ -56,6 +74,36 @@
                 <input type="hidden" name="redirect_uri" value="{{ params.redirect_uri }}">
                 <input type="hidden" name="state" value="{{ params.state }}">
                 <input type="hidden" name="scope" value="{{ params.scope }}">
+                <input type="hidden" name="action" value="approve">
+                <button type="submit">허용하고 계속</button>
+            </form>
+            <form class="owner-form" method="post" style="margin-top: 12px;">
+                {% csrf_token %}
+                <input type="hidden" name="response_type" value="{{ params.response_type }}">
+                <input type="hidden" name="client_id" value="{{ params.client_id }}">
+                <input type="hidden" name="redirect_uri" value="{{ params.redirect_uri }}">
+                <input type="hidden" name="state" value="{{ params.state }}">
+                <input type="hidden" name="scope" value="{{ params.scope }}">
+                <input type="hidden" name="action" value="switch">
+                <button type="submit" class="owner-button-secondary">다른 계정으로 로그인</button>
+            </form>
+            {% else %}
+            <p class="owner-hint">
+                {% if platform_client %}
+                MockMap 점주 계정으로 로그인한 뒤 ShopHub 연동을 허용합니다.
+                <a href="/owner/signup/">계정이 없으면 가입하기</a>
+                {% else %}
+                이 OAuth client의 점주 계정으로 로그인해 주세요.
+                {% endif %}
+            </p>
+            <form class="owner-form" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="response_type" value="{{ params.response_type }}">
+                <input type="hidden" name="client_id" value="{{ params.client_id }}">
+                <input type="hidden" name="redirect_uri" value="{{ params.redirect_uri }}">
+                <input type="hidden" name="state" value="{{ params.state }}">
+                <input type="hidden" name="scope" value="{{ params.scope }}">
+                <input type="hidden" name="action" value="login">
                 <label>
                     <span>계정명</span>
                     <input name="username" type="text" value="{{ values.username }}" autocomplete="username" required>
@@ -64,8 +112,9 @@
                     <span>비밀번호</span>
                     <input name="password" type="password" autocomplete="current-password" required>
                 </label>
-                <button type="submit">{% if platform_client %}ShopHub 연동 계속{% else %}승인하고 계속{% endif %}</button>
+                <button type="submit">{% if platform_client %}로그인하고 연동 계속{% else %}승인하고 계속{% endif %}</button>
             </form>
+            {% endif %}
         </section>
     </main>
 </body>

@@ -870,6 +870,12 @@ input {
     cursor: pointer;
 }
 
+.owner-form button.owner-button-secondary {
+    color: #29425b;
+    background: #eef2f7;
+    border: 1px solid #d5dde8;
+}
+
 .owner-danger {
     width: 100%;
     background: #b3261e;

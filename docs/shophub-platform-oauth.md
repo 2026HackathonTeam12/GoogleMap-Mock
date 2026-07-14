@@ -137,6 +137,17 @@ def resolve_oauth_client(client_id: str) -> tuple[ClientKind, OwnerProfile | Pla
 
 ### 5.3 OAuth Page UI (`oauth_authorize.html`)
 
+로그인된 세션이 있어도 **자동 승인하지 않습니다.**
+
+| 상태 | 화면 |
+|------|------|
+| 미로그인 | 계정/비밀번호 로그인 후 코드 발급 |
+| 이미 로그인 | 연결될 가게 표시 + **허용하고 계속** / **다른 계정으로 로그인** |
+| 허용 POST (`action=approve`) | authorization code redirect |
+| 계정 전환 POST (`action=switch`) | 로그인 폼 표시 |
+
+| 가입 링크 | `/owner/signup/` |
+
 Platform client일 때 표시 변경:
 
 | 항목 | Owner client (기존) | Platform client (ShopHub) |
@@ -153,9 +164,11 @@ Platform client일 때 표시 변경:
 
 ### 5.4 GET + 이미 MockMap 세션 로그인된 경우
 
-- Platform client + 현재 user가 OwnerProfile 보유 → 즉시 code redirect (기존 owner GET flow와 동일)
+- Platform/owner client 모두 **즉시 code redirect 하지 않음**
+- 동의 화면(`mode=consent`)을 보여 주고, `action=approve` POST 시에만 code 발급
+- `action=switch` 시 로그인 폼으로 전환해 다른 계정·비밀번호 재입력 가능
 
-### 5.4 Redirect (성공)
+### 5.5 Redirect (성공)
 
 ```text
 {redirect_uri}?code=oac_xxx&state={state}

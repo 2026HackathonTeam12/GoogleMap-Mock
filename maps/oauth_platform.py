@@ -59,7 +59,7 @@ def is_allowed_owner_redirect_uri(request, redirect_uri):
     )
 
 
-def authorize_context(params, client_kind, client, errors, values, owner_profile):
+def authorize_context(params, client_kind, client, errors, values, owner_profile, mode='login'):
     return {
         'params': params,
         'errors': errors,
@@ -67,6 +67,7 @@ def authorize_context(params, client_kind, client, errors, values, owner_profile
         'profile': owner_profile if client_kind == 'owner' else None,
         'platform_client': client if client_kind == 'platform' else None,
         'owner_profile': owner_profile,
+        'mode': mode,
     }
 
 
@@ -95,18 +96,44 @@ def handle_oauth_authorize(request, params, get_user_owner_profile_fn):
 
 
 def handle_platform_authorize(request, params, platform_client, current_profile, get_user_owner_profile_fn):
-    if request.method == 'GET' and current_profile:
-        return redirect_with_authorization_code(current_profile, params, platform_client)
-
+    # Never auto-approve on GET — always require explicit consent or login (X-like).
     if request.method == 'GET':
+        mode = 'consent' if current_profile else 'login'
         return render(
             request,
             'maps/oauth_authorize.html',
-            authorize_context(params, 'platform', platform_client, {}, {}, current_profile),
+            authorize_context(params, 'platform', platform_client, {}, {}, current_profile, mode=mode),
         )
 
     if request.method != 'POST':
         return HttpResponseNotAllowed(['GET', 'POST'])
+
+    action = request.POST.get('action', 'login').strip() or 'login'
+
+    if action == 'switch':
+        return render(
+            request,
+            'maps/oauth_authorize.html',
+            authorize_context(params, 'platform', platform_client, {}, {}, None, mode='login'),
+        )
+
+    if action == 'approve':
+        if not current_profile:
+            return render(
+                request,
+                'maps/oauth_authorize.html',
+                authorize_context(
+                    params,
+                    'platform',
+                    platform_client,
+                    {'account': '세션이 만료되었습니다. MockMap 점주 계정으로 다시 로그인해주세요.'},
+                    {},
+                    None,
+                    mode='login',
+                ),
+                status=403,
+            )
+        return redirect_with_authorization_code(current_profile, params, platform_client)
 
     username = request.POST.get('username', '').strip()
     password = request.POST.get('password', '')
@@ -123,6 +150,7 @@ def handle_platform_authorize(request, params, platform_client, current_profile,
                 {'account': 'MockMap 점주 계정으로 로그인해주세요. 계정이 없다면 먼저 가입해주세요.'},
                 {'username': username},
                 None,
+                mode='login',
             ),
             status=403,
         )
@@ -140,25 +168,48 @@ def handle_owner_client_authorize(
 ):
     effective_profile = owner_profile or current_profile
 
-    if request.method == 'GET' and not effective_profile:
-        return render(
-            request,
-            'maps/oauth_authorize.html',
-            authorize_context(params, 'owner', owner_profile, {}, {}, None),
-        )
-
-    if request.method == 'GET' and current_profile and current_profile.pk == effective_profile.pk:
-        return redirect_with_authorization_code(effective_profile, params, None)
-
     if request.method == 'GET':
+        if current_profile and effective_profile and current_profile.pk == effective_profile.pk:
+            mode = 'consent'
+            shown_profile = current_profile
+        else:
+            mode = 'login'
+            shown_profile = effective_profile
         return render(
             request,
             'maps/oauth_authorize.html',
-            authorize_context(params, 'owner', owner_profile, {}, {}, effective_profile),
+            authorize_context(params, 'owner', owner_profile, {}, {}, shown_profile, mode=mode),
         )
 
     if request.method != 'POST':
         return HttpResponseNotAllowed(['GET', 'POST'])
+
+    action = request.POST.get('action', 'login').strip() or 'login'
+
+    if action == 'switch':
+        return render(
+            request,
+            'maps/oauth_authorize.html',
+            authorize_context(params, 'owner', owner_profile, {}, {}, None, mode='login'),
+        )
+
+    if action == 'approve':
+        if not current_profile or (owner_profile and current_profile.pk != owner_profile.pk):
+            return render(
+                request,
+                'maps/oauth_authorize.html',
+                authorize_context(
+                    params,
+                    'owner',
+                    owner_profile,
+                    {'account': '이 OAuth client의 점주 계정으로 로그인해주세요.'},
+                    {},
+                    None,
+                    mode='login',
+                ),
+                status=403,
+            )
+        return redirect_with_authorization_code(current_profile, params, None)
 
     username = request.POST.get('username', '').strip()
     password = request.POST.get('password', '')
@@ -175,6 +226,7 @@ def handle_owner_client_authorize(
                 {'account': '이 OAuth client의 점주 계정으로 로그인해주세요.'},
                 {'username': username},
                 effective_profile,
+                mode='login',
             ),
             status=403,
         )
